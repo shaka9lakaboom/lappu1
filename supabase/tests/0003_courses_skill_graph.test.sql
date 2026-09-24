@@ -4,7 +4,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(48);
+select plan(49);
 
 -- Fixtures, written as the table owner (the way the backend writes) -------
 insert into auth.users (id, email)
@@ -233,6 +233,14 @@ select throws_ok(
     $$ update public.model_runs set status = 'FAILED' $$,
     '55000', null,
     'model_runs is append-only'
+);
+insert into auth.users (id, email) values ('00000000-0000-4000-8000-0000000003c1', 'p2c@test.invalid');
+insert into public.model_runs (trace_id, task_type, provider, model, prompt_version, input_hash, latency_ms, status, learner_id)
+values ('job:c', 'EMBED_QUERY', 'google', 'gemini-embedding-2', 'retrieval-query/v1', repeat('f', 64), 5, 'SUCCEEDED',
+        '00000000-0000-4000-8000-0000000003c1');
+select lives_ok(
+    $$ delete from auth.users where id = '00000000-0000-4000-8000-0000000003c1' $$,
+    'deleting an account nulls its model_runs reference instead of being blocked'
 );
 
 -- Analysis provenance ---------------------------------------------------

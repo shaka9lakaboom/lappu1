@@ -90,9 +90,27 @@ create index model_runs_trace_idx on public.model_runs (trace_id);
 create index model_runs_task_created_idx on public.model_runs (task_type, created_at desc);
 create index model_runs_failures_idx on public.model_runs (created_at desc) where status <> 'SUCCEEDED';
 
+-- Append-only, except that deleting a learner or course nulls the reference
+-- (ON DELETE SET NULL): the trace outlives the account without identifying it.
+create function public.model_runs_guard_update()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+    if (to_jsonb(new) - 'learner_id' - 'course_id') = (to_jsonb(old) - 'learner_id' - 'course_id')
+       and (new.learner_id is null or new.learner_id = old.learner_id)
+       and (new.course_id is null or new.course_id = old.course_id) then
+        return new;
+    end if;
+    raise exception 'model_runs is append-only' using errcode = '55000';
+end;
+$$;
+revoke execute on function public.model_runs_guard_update() from public, anon, authenticated;
+
 create trigger model_runs_append_only
     before update on public.model_runs
-    for each row execute function public.reject_update();
+    for each row execute function public.model_runs_guard_update();
 
 -- ---------------------------------------------------------------------------
 -- policy_config: tunable intelligence defaults (architecture §5.2, Appendix B)
