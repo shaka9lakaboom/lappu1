@@ -2,162 +2,206 @@
 
 This record carries live implementation status (architecture §0.1). It must never
 claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisions:
-[`decisions/`](decisions/) (0001 P0, 0002 P1).
+[`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A).
 
 **Last updated:** 2026-09-25
+
+## Hackathon runtime decision (ADR 0003 §1)
+
+SkillMirror is a **local-first hackathon application**. There is no Vercel/Render
+deployment, production domain, cloud deployment pipeline or production SMTP.
+
+```
+unpacked Chrome extension → local Next.js :3000 → local FastAPI :8000 (+ in-process worker)
+                                                    → hosted Supabase (Auth, Postgres, pgvector)
+                                                    → Google AI API (Gemini)
+```
+
+The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration + Final Hardening**.
 
 ## Repository
 
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main` (P0 merged; P1 not yet merged) |
-| P1 started from `main` | `b6ba8533cb63a780cefde7ccad7a943690216392` (merge of P0 PR #1) |
-| Development branch | `skillmirror-p1-capture-ingestion` |
-| P1 commits | `435dc85` db + contract · `d695406` backend ingestion · `cf75124` extension · `780abd4` web Activity + CI · `a1e19f7` ADR 0002 + live acceptance · `9defdbf` acceptance fix · closure commit adding this record |
-| Earlier CI-verified P1 commit | `780abd4`, [run 36059437102](https://github.com/shaka9lakaboom/lappu1/actions/runs/36059437102), all 7 jobs green |
-| HEAD | the P1 closure commit that adds this record; its CI run is linked from the P1 pull request |
+| Default branch | `main`. P0 and P1 are merged. |
+| P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
+| Development branch | `skillmirror-p2-p3a-intelligence-foundation` |
+| Started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
+| Commits | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · provider-schema allowlist + acceptance script · closure commit adding this record |
+| CI | run [36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084) on `2801ed4`: **all 7 jobs green**; later commits are linked from the PR |
+| Pull request | not opened: the acceptance gate is blocked (see *Exact next action*) |
 
 ## Phase
 
-**Completed phase: P1 — Capture + ingestion. Status: COMPLETE.** The P1 exit gate
-(architecture §19: "real ChatGPT turn captured, stored once, survives duplicate resend") passed
-live against the hosted Supabase project on 2026-09-25. P0 remains green.
+**Current phase: P2 — Courses + Skill Graph and P3A — Qualification + Retrieval + Mapping.**
+**Status: IMPLEMENTED, BLOCKED ON REAL ACCEPTANCE.** Everything that runs without a real
+model passes locally and in CI (with a scripted fake model provider). Two gates still need a human:
+
+1. **No `GEMINI_API_KEY` exists on this machine.** The real Gemini acceptance (course bootstrap,
+   embeddings, retrieval and mapping on a real turn) has not run.
+2. **Migration 0003 is not yet applied to the hosted project.** `supabase migration list --linked`
+   shows remote `0001`/`0002` and local `0003` pending. `supabase db push --linked --dry-run`
+   would push exactly `0003_courses_skill_graph.sql`. The real push was not executed: it needs the
+   owner's explicit approval in this environment.
+
+P3B (attribution, EvidenceEvents) and P4 (mastery, debt) are **not started**, by design.
 
 | Gate | State | Evidence |
 | --- | --- | --- |
-| P0 remains green | PASS | All P0 jobs/tests still pass (see *Automated results*) |
-| Migration 0002 tested | PASS | pgTAP 33 assertions (46 total with 0001); applied to hosted |
-| ChatGPTAdapter captures real visible messages | PASS | Live gate; real DOM fixtures |
-| CaptureManager stable (one record per final message) | PASS | Unit + real-DOM transition tests; live gate |
-| Pause/Resume | PASS | Unit tests; Chromium E2E |
-| Queue survives interruption | PASS | Backend offline in the live gate; outage + browser restart in the Chromium E2E |
-| Authenticated `POST /v1/events/batch` | PASS | Live gate (ES256 Supabase JWT via JWKS); backend tests |
-| Learner identity from JWT only | PASS | Spoofed `learner_id` → 403 (live and tests) |
-| Raw data stored durably | PASS | Hosted rows after Sync now |
-| `processing_jobs` created | PASS | 2 `PROCESS_RAW_MESSAGE` jobs, `PENDING` |
-| Duplicate resend → zero new canonical rows | PASS | Live: 2 resends → `accepted 0, duplicates 2`; counts unchanged |
-| Activity page shows raw capture/status | PASS | Live: 2 rows, "Synced / Waiting for processing" |
-| Real ChatGPT turn end-to-end | PASS | See *Live acceptance* |
+| P0/P1 remain green | PASS | All P0/P1 tests pass locally; CI jobs unchanged apart from extensions |
+| Migration 0003 applied/tested | PASS locally; **hosted: PENDING** | pgTAP 49 assertions on the local stack; hosted push awaits approval |
+| Arbitrary course can be created | PASS (API + DB) | `test_courses_api.py`: 201, membership, job enqueued, no model call in request |
+| Course skill graph generated | PASS with fake model; **real: BLOCKED** | `test_skill_graph_db.py` (30 skills, 4 topics, edges, overlay) |
+| Canonical registry works | PASS | Immutable UUID, rename → `PREVIOUS_NAME`, merge → `MERGED`, pgTAP + DB tests |
+| Aliases / canonicalization | PASS | Variants (e.g. Visualization/Visualisation, plural, case) → one UUID; alias conflicts refused |
+| Embeddings stored | PASS with fake vectors; **real: BLOCKED** | 768-d `vector`, HNSW, content-hash cache, re-embed on rename/alias |
+| Lexical + vector retrieval | PASS | `test_retrieval_db.py`: FTS incl. aliases, pgvector-only hit, course-first prior |
+| Top 20 → top 8 | PASS | Pool of 20 ranked; reranker sees exactly the pool; 8 handed to the mapper |
+| ModelGateway used by all model-dependent engines | PASS | Only `app/model_gateway/gemini.py` imports the SDK; engines call the gateway |
+| model_runs logged | PASS | Every call: task, provider, model, prompt_version, input hash, tokens, latency, status, trace |
+| Relevance / intent / skill-bearing | PASS with fake model; **real: BLOCKED** | `test_qualification.py`, `test_pipeline_db.py` |
+| Segmentation | PASS with fake model | Mixed and multi-task turns → segments, only learning ones mapped |
+| Mapping confidence gates | PASS | 0.80 accept, 0.65–0.79 adjudication, < 0.65 abstain (boundaries tested) |
+| Unknown concepts do not silently become active skills | PASS | `skill_candidates` `PENDING_REVIEW`; skill count unchanged; DB guard on mappings |
+| Abstention | PASS | Low confidence, unresolved adjudication, invalid output, missing attachment context |
+| Provenance to raw activity | PASS | Segment → user/assistant raw ids; decision → pool, model runs, prompt versions, policy |
+| Worker durable / idempotent | PASS | SKIP LOCKED (3 concurrent workers), retry, defer, crash recovery, idempotent rerun |
+| Local + hosted acceptance | **BLOCKED** | Needs `GEMINI_API_KEY` and the hosted 0003 push (see above) |
 | Complete local suite | PASS | See *Automated results* |
-| CI green | PASS on `780abd4`; final SHA linked from the PR | GitHub Actions |
-
-## Live acceptance (2026-09-25, `npm run acceptance:live --workspace @skillmirror/extension`)
-
-Real ChatGPT (chatgpt.com, signed-out session) → unpacked extension `0.2.0`
-(id `cohpimnabjigooghbigblennedbplojm`) → local backend (`uvicorn`, :8000) → hosted Supabase
-Postgres (session pooler). One Playwright run, **1 passed** (1.1 min).
-
-1. A fresh learner signed up on hosted Supabase Auth (`skillmirror-p1-1790286593990@mailinator.com`,
-   id `47f93d92-e672-4b16-96ca-64bc1ec67aa9`). The learner signed in to the Companion popup.
-2. With the backend **offline**, the prompt "Explain binary search in one sentence." was sent in real
-   ChatGPT. Both messages were captured and **queued (2)**: the user message and ChatGPT's actual answer
-   ("Binary search finds an item in a sorted list by repeatedly dividing the search range in half."),
-   with ChatGPT's message ids and conversation id `6ab59b06-57e8-83ea-8e66-2b0d108cf94b`. The hosted
-   row count was 0 at this point.
-3. The backend started, **Sync now** was pressed, and the queue drained to 0.
-4. Hosted Postgres (service-level count): **2 raw_messages, 1 conversation, 2 processing_jobs**. The
-   learner read them through RLS with provenance intact: learner id from the JWT, `chatgpt` /
-   `browser_extension`, external message ids, the assistant's parent = the user message,
-   `message_index` 0/1, `revision_index` 0, `captured_at`/`received_at`, `client_event_uuid` = the
-   queued `event_id`, and `capture_metadata` (extension 0.2.0, adapter chatgpt-1). Both jobs are `PENDING`.
-5. The Activity page (web app → hosted, RLS) showed both rows.
-6. The exact queued envelopes were resent twice: each resend returned `accepted 0, duplicates 2` with
-   the stored ids. The counts were unchanged (2/1/2). A body with a spoofed `learner_id` returned **403**.
-
-Evidence (local, gitignored): `apps/extension/test-results/acceptance/`, containing `evidence.json`,
-`queued-envelopes.json`, `chatgpt.png`, `popup.png` and `activity.png`.
-
-Test accounts: the passing learner above is kept as hosted evidence. The two learners from the
-aborted runs (0 rows each) were deleted. No other `skillmirror-p1-*` accounts exist.
-
-## Hosted Supabase verification (2026-09-25)
-
-No project secrets, keys or project ref are recorded here.
-
-- **Migrations:** `supabase migration list --linked` shows local `0001`/`0002` = remote `0001`/`0002`.
-- **Catalog (read-only, `supabase db query --linked`):**
-  - `conversations`, `raw_messages`, `attachments`, `processing_jobs`: RLS enabled.
-  - The only policies are `*_select_own` (SELECT).
-  - `authenticated` has SELECT only (no INSERT, UPDATE or DELETE). `anon` has no SELECT.
-  - `activity_feed` is a view with `security_invoker=true`, SELECT for `authenticated` only.
-- **Security advisors (`supabase db advisors --linked --type security`):** no findings.
-- **JWT signing:** the project publishes ES256 keys (JWKS), so `SUPABASE_JWT_SECRET` is not needed.
+| CI green | PASS on `2801ed4` | Run 36071071084, 7/7 jobs (no Gemini key used) |
 
 ## Database
 
-- Latest migration: **`0002_capture_ingestion.sql`**. It adds enums, `conversations`, append-only
-  `raw_messages` (update trigger blocks edits), `attachments` (metadata only), `processing_jobs`
-  (§7.3 state machine, SKIP LOCKED claim primitives in `app/jobs/queue.py`) and the `activity_feed`
-  view.
-- Idempotency is enforced by unique indexes on the §6.6 preferred identity
-  `(learner, provider, external_message_id, revision_index)`, on
-  `(learner, provider, external_message_id, content_hash)`, and on the fallback
-  `(learner, fingerprint)`.
-- pgTAP: `supabase/tests/0001_p0_foundation.test.sql` (13) and `0002_capture_ingestion.test.sql` (33).
+- Latest migration: **`0003_courses_skill_graph.sql`**. It adds 13 tables, all with RLS enabled:
+  - P2: `courses`, `course_memberships`, `skill_nodes`, `skill_aliases`, `skill_edges`,
+    `course_skills`, `skill_embeddings` (`vector(768)`, HNSW cosine), `model_runs`, `policy_config`
+  - P3A: `activity_segments`, `mapping_decisions`, `skill_mappings`, `skill_candidates`
+  - Also `processing_jobs.outcome` and a `private.is_course_member()` policy helper.
+- Clients (`authenticated`) have SELECT only:
+  - their own courses, memberships, course overlays and analysis rows
+  - ACTIVE registry nodes, aliases and edges
 
-## URLs and versions
+  `model_runs`, `policy_config`, `skill_embeddings` and `skill_candidates` are server-only.
+  `anon` has nothing. All writes go through the backend.
+- `policy_config` seeds (§9.3, §9.4, Appendix B):
+  - retrieval 0.55 semantic / 0.30 lexical / 0.15 course prior, pool 20, rerank 8
+  - mapping 0.80 / 0.65
+  - qualification floors 0.60
+  - processing unit: 4 context messages, 120 s pairing window
+  - skill graph 30–60 skills (hard 20–80), default importance 0.5
+- pgTAP: `0001` (13), `0002` (33), `0003` (49) = **95**.
+- Hosted: `0001`, `0002` applied; **`0003` pending** (see *Phase*).
+
+## Intelligence configuration
 
 | Item | Value |
 | --- | --- |
-| Web (local) | http://localhost:3000 (`/activity` added) |
-| API (local) | http://localhost:8000 (`/health`, `POST /v1/events/batch`, `GET /v1/events/sync-status`, OpenAPI at `/docs`) |
-| Deployed web / API | none (deployment is P9) |
-| Extension version | **0.2.0**, dev id `cohpimnabjigooghbigblennedbplojm` (from `manifest.json` `key`) |
-| Extension permissions | `storage`, `alarms`; content script on `https://chatgpt.com/*` only; no host permissions |
+| Generation model | `gemini-3.7-flash` (stable; structured JSON output; thinking level `low`) |
+| Embedding model | `gemini-embedding-2`, 768 dimensions (task via text prefix; one `Content` per text) |
+| SDK | `google-genai` 2.25 (only in `app/model_gateway/gemini.py`) |
+| Prompt versions | `skill-graph-bootstrap/v1`, `relevance-intent/v1`, `skill-rerank/v1`, `skill-mapping/v1`, `mapping-adjudication/v1` |
+| Embedding input versions | `skill-embedding-text/v1`, `retrieval-query/v1` |
+| Analysis / mapper version | `p3a-v1` / `mapper/p3a-v1` |
+| Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE` |
+
+## URLs and versions (local)
+
+| Item | Value |
+| --- | --- |
+| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}` added) |
+| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, OpenAPI `/docs` |
+| Worker | in the API process when `DATABASE_URL` + `GEMINI_API_KEY` are set; or `python -m app.jobs.worker [--once]` |
+| Deployed web / API | none, by decision (local-first) |
+| Extension version | 0.2.0, dev id `cohpimnabjigooghbigblennedbplojm` (unchanged in this phase) |
 | Backend version | 0.1.0 |
 
 ## Automated results (local run on 2026-09-25, Windows, Node 22.14, Python 3.13)
 
 | Suite | Local | CI job |
 | --- | --- | --- |
-| Backend `ruff check` + `ruff format --check` | clean | Backend |
-| Backend pytest, unit (no DB) | **97 passed, 20 skipped** | Backend |
-| Backend pytest, with local Postgres (`TEST_DATABASE_URL`) | **117 passed** (21 `db`-marked) | Backend ingestion + database |
-| Database pgTAP | **46 passed** (13 + 33) | Database |
+| Backend `ruff check` + `ruff format --check` (incl. benchmark runner) | clean | Backend |
+| Backend pytest, unit (no DB) | **229 passed, 57 skipped** | Backend |
+| Backend pytest, with local Postgres | **286 passed** (58 `db`-marked) | Backend ingestion + intelligence + database |
+| Database pgTAP | **95 passed** (13 + 33 + 49) | Database |
 | Web ESLint | 0 problems | Web |
 | Typecheck (web, contracts, config, ui, extension) | 5/5 clean | Web, Extension |
-| Web vitest | **24 passed** | Web |
-| Extension vitest (adapter, capture, queue, sync, auth, contracts) | **78 passed** | Extension |
-| Extension Chromium (load ×2, capture → queue → sync E2E ×1) | **3 passed** | Extension |
-| Web + extension production builds | pass | Web, Extension |
-| Live P1 acceptance (real ChatGPT + hosted) | **1 passed** | not in CI (needs a real browser session and hosted credentials) |
-| Hosted auth round trip (P0) | not re-run in P1 | Auth round trip (local stack) |
+| Web vitest | **32 passed** | Web |
+| Web production build (no env) | pass | Web |
+| Extension vitest | **78 passed** | Extension |
+| Extension build + manifest validation + Chromium (load ×2, capture → queue → sync ×1) | pass, **3 passed** | Extension |
+| Real Gemini acceptance (P2 + P3A) | **not run: no `GEMINI_API_KEY`** | not in CI by design |
+| P3A smoke benchmark (`benchmark/runners/p3a_smoke.py`, 12 cases) | **not run: needs Gemini** | schema + scorer only in CI |
+| Real acceptance script (`services/backend/scripts/acceptance_p2_p3a.py`) | ready; **not run: needs Gemini + hosted 0003** | not in CI by design |
+
+New backend test modules: `test_model_gateway` (27), `test_skill_graph_unit`, `test_retrieval_scoring`,
+`test_qualification`, `test_mapping`, `test_courses_api`, `test_policy_db`, `test_skill_graph_db`,
+`test_retrieval_db`, `test_pipeline_db`, `test_worker_db`, `test_contract_parity`, `test_benchmark_smoke`.
+
+## CI
+
+Existing jobs are extended; no job was added:
+- The backend job lints `benchmark/runners`.
+- Backend integration now covers courses, the skill graph, retrieval, the P3A pipeline and the worker.
+- pgTAP includes 0003.
+- The hygiene scan also rejects Google API keys.
+
+No job needs `GEMINI_API_KEY`: intelligence tests use a scripted fake provider.
+Run [36070884068](https://github.com/shaka9lakaboom/lappu1/actions/runs/36070884068) (`c723960`)
+failed backend lint (one unformatted test file) and was cancelled by the fix. Run
+[36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084) (`2801ed4`)
+passed all 7 jobs: hygiene, backend, backend integration, web, extension, database,
+auth round trip.
 
 ## Known defects and caveats
 
-- **Signed-in ChatGPT layout is covered only by a synthetic fixture.** The live gate used the signed-out
-  ChatGPT shell (real DOM, recorded fixtures). The signed-in app layout (`[data-message-author-role]`)
-  is supported, but it is tested against a fixture built from the publicly known structure. It has not
-  been verified on a signed-in account. Record a real fixture and run the live gate signed in next.
-- **DOM fragility:** a ChatGPT UI change can break selectors. The fixture tests fail loudly then, but the
-  extension does not yet report "capture degraded" in the popup (§16 data-quality rule; planned for P8).
-- **Opening an old conversation captures its visible messages once** (client and server deduplicate).
-  This is not a bulk historical import, but it can record pre-install messages that the learner views.
-- Attachments: metadata only. `context_incomplete=true` whenever attachment content was not captured.
-- Auto-confirm is still on for the hosted project (see P0). Mailinator test addresses are public.
-- During P1 closure, the hosted database password was entered in a malformed URL and fragments of it
-  appeared in local tool output. It was then **reset by the owner**. The current password was never
-  displayed.
-- On the development machine, closing a Playwright Chromium browser is sometimes slow (see P0). The
-  Chromium tests use long timeouts locally.
-- No worker processes `processing_jobs` yet (P3). Jobs stay `PENDING` by design.
+- **Real-model behaviour is unverified.** Prompts, schema compatibility with the Gemini JSON-schema
+  subset, graph size and quality, and mapping calibration have only been exercised with a fake
+  provider. The first real run may need prompt or schema adjustments (each would bump its
+  `prompt_version`).
+- **Hosted database is one migration behind** (0003 pending) until the owner approves the push.
+- Lexical scores are relative to the best match in the pool (relative score fusion). A pool of
+  uniformly weak lexical matches still gives its best one a lexical score of 1.0. The semantic
+  term and the mapper gate bound the effect. Tune against the benchmark (P8).
+- A user message whose assistant reply is captured more than 120 s later is analysed alone. The
+  late reply's job then completes as `ALREADY_ANALYZED`, without re-analysis.
+- `raw_messages.active_course_id` has no FK (append-only table). It is validated at processing time.
+- The extension does not send `active_course_id` yet. Course context is then all of the learner's
+  courses (at most 5).
+- `skill_candidates` has no review UI yet (P7). The course graph cannot be regenerated from the UI.
+- Carried over from P1: the signed-in ChatGPT layout is covered only by a synthetic fixture; there
+  is no "capture degraded" popup state yet (P8); auto-confirm is on for the hosted project.
 
 ## Required environment variables (names only)
 
-- Web (`apps/web/.env.local`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_API_URL`
-- Backend (`services/backend/.env`): `APP_ENV`, `APP_NAME`, `API_VERSION`, `CORS_ORIGINS`
-  (local: `http://localhost:3000,chrome-extension://cohpimnabjigooghbigblennedbplojm`), `SUPABASE_URL`,
-  **`DATABASE_URL`** (session pooler URI, password percent-encoded), `SUPABASE_JWT_SECRET` (legacy
-  HS256 only), `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (unused by P1)
+- Web (`apps/web/.env.local`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `NEXT_PUBLIC_API_URL` (required for the Courses pages)
+- Backend (`services/backend/.env`):
+  - existing: `APP_ENV`, `APP_NAME`, `API_VERSION`, `CORS_ORIGINS`, `SUPABASE_URL`, `DATABASE_URL`,
+    `SUPABASE_JWT_SECRET` (legacy HS256 only)
+  - **new:** `GEMINI_API_KEY` (server only), optional `GEMINI_GENERATION_MODEL`,
+    `GEMINI_EMBEDDING_MODEL`, `GEMINI_THINKING_LEVEL`, `MODEL_TIMEOUT_SECONDS`, `WORKER_ENABLED`,
+    `WORKER_POLL_SECONDS`, `WORKER_BATCH_SIZE`, `WORKER_STALE_AFTER_SECONDS`
 - Extension build (optional, public values): `SKILLMIRROR_SUPABASE_URL`, `SKILLMIRROR_SUPABASE_ANON_KEY`,
-  `SKILLMIRROR_API_URL`, `SKILLMIRROR_WEB_URL`. It falls back to the web `NEXT_PUBLIC_*` values.
-- Tests: `TEST_DATABASE_URL`, `REQUIRE_DB_TESTS` (backend integration), `UPDATE_GOLDEN` (extension golden envelopes)
+  `SKILLMIRROR_API_URL`, `SKILLMIRROR_WEB_URL`
+- Tests: `TEST_DATABASE_URL`, `REQUIRE_DB_TESTS`, `UPDATE_GOLDEN`
 
 ## Exact next action
 
-Review and merge the P1 pull request `skillmirror-p1-capture-ingestion` → `main`. Optionally, first
-run the live gate once with a **signed-in** ChatGPT account and record a real app-layout fixture. Then
-start **P2 — Courses + Skill Graph** (architecture §19): course onboarding, the graph
-generator/canonicalizer, skill tables (migration `0003`), embeddings and pgvector retrieval. The P2
-exit gate: create an arbitrary course and retrieve relevant skill candidates.
+1. Owner: put a Google AI key in `services/backend/.env` as `GEMINI_API_KEY=…`. Never commit or
+   paste it anywhere else.
+2. Owner: approve applying migration 0003 to the hosted project
+   (`npx supabase db push --linked` from the repository root), or run it yourself.
+3. Then run the real acceptance:
+   1. Start the backend (`npm run dev:backend`, worker in-process) and the web app (`npm run dev:web`).
+      `services/backend/scripts/acceptance_p2_p3a.py` automates steps 2–6 through the public APIs and
+      writes an evidence JSON; the UI steps are then checked by hand.
+   2. Create "Introduction to Python Programming" (Beginner) at `/courses/new`.
+   3. Verify the bootstrap job completes: about 30–60 sensible skills, embeddings stored.
+   4. Verify a retrieval query returns relevant candidates.
+   5. Let the worker process an existing P1 raw turn, or a new simple learning turn.
+   6. Verify qualification → retrieval → mapping or abstention, with provenance back to
+      `raw_messages` and `model_runs`.
+   7. Run `benchmark/runners/p3a_smoke.py` against that course.
+4. Record the results here, then open the PR `skillmirror-p2-p3a-intelligence-foundation` → `main`
+   (do not merge). Then start P3B (attribution + EvidenceEvents).
