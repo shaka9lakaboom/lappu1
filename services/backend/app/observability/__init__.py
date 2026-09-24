@@ -1,3 +1,1 @@
-from app.observability.logger import logger
-
-__all__ = ["logger"]
+"""Logging and (later) metrics."""

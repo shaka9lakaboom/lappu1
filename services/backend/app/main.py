@@ -1,45 +1,37 @@
-from datetime import datetime, timezone
+"""SkillMirror backend entry point.
+
+Run locally from services/backend:
+
+    uvicorn app.main:app --reload --port 8000
+"""
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.config import settings
-from app.api.v1.router import api_v1_router, HealthResponse
-from app.observability import logger
 
-app = FastAPI(
-    title=settings.app_name,
-    version=settings.api_version,
-    description="SkillMirror FastAPI Backend Service Foundation (P0)",
-)
-
-# Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.cors_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# Register API v1 router
-app.include_router(api_v1_router, prefix="/api")
+from app.api import health, v1
+from app.core.config import Settings, get_settings
+from app.observability.logging import configure_logging
 
 
-# Top-level GET /health endpoint as required by Section 7 & Section 9
-@app.get("/health", response_model=HealthResponse, tags=["Health"])
-async def get_health():
-    """
-    Primary health endpoint for backend service verification.
-    """
-    logger.info("Health endpoint called")
-    return HealthResponse(
-        status="ok",
-        service=settings.app_name,
-        environment=settings.app_env,
-        version=settings.api_version,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
+def create_app(settings: Settings | None = None) -> FastAPI:
+    settings = settings or get_settings()
+    configure_logging(settings)
+
+    app = FastAPI(title="SkillMirror API", version=settings.api_version)
+    app.dependency_overrides[get_settings] = lambda: settings
+
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
+        )
+
+    app.include_router(health.router)
+    app.include_router(v1.router)
+    return app
 
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+app = create_app()

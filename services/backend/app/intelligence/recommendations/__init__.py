@@ -1,3 +1,1 @@
-"""
-Recommendations engine placeholder (P0 baseline)
-"""
+"""Engine 16 - Recommendations. (P5+)"""

@@ -1,0 +1,50 @@
+# --- Secrets: never commit real environment files -------------------------
+.env
+.env.*
+!.env.example
+!.env.e2e.example
+*.pem
+*.key
+
+# --- Node / JavaScript ----------------------------------------------------
+node_modules/
+npm-debug.log*
+.npm/
+*.tsbuildinfo
+
+# Next.js
+apps/web/.next/
+apps/web/out/
+apps/web/next-env.d.ts
+
+# Extension build output
+apps/extension/dist/
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# --- Python ---------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+
+# --- Supabase CLI local state ---------------------------------------------
+supabase/.branches/
+supabase/.temp/
+
+# --- OS / editor ----------------------------------------------------------
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

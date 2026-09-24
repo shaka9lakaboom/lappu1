@@ -1,21 +1,45 @@
-import React, { useState } from 'react';
+import { PRODUCT_NAME } from '@skillmirror/config';
+import { useEffect, useState } from 'react';
 
-export const App: React.FC = () => {
-  const [status] = useState('SkillMirror Extension Ready (P0)');
+import type { GetStatusRequest, StatusResponse } from '../shared/messages';
+
+type WorkerState = { kind: 'loading' } | { kind: 'ok'; status: StatusResponse } | { kind: 'error'; message: string };
+
+const rowStyle = { display: 'flex', justifyContent: 'space-between', gap: 12, padding: '4px 0' } as const;
+
+export function App() {
+  const [worker, setWorker] = useState<WorkerState>({ kind: 'loading' });
+
+  useEffect(() => {
+    const request: GetStatusRequest = { type: 'GET_STATUS' };
+    chrome.runtime
+      .sendMessage<GetStatusRequest, StatusResponse>(request)
+      .then((status) => setWorker({ kind: 'ok', status }))
+      .catch((error: unknown) =>
+        setWorker({ kind: 'error', message: error instanceof Error ? error.message : String(error) }),
+      );
+  }, []);
 
   return (
-    <div style={{ width: '320px', padding: '16px', fontFamily: 'system-ui, sans-serif', backgroundColor: '#0f172a', color: '#f8fafc' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-        <div style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: '#22c55e' }} />
-        <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 'bold' }}>SkillMirror</h2>
+    <main style={{ padding: 16 }}>
+      <h1 style={{ fontSize: 16, margin: '0 0 12px' }}>{PRODUCT_NAME} Companion</h1>
+      <div style={rowStyle}>
+        <span>Version</span>
+        <span data-testid="version">{chrome.runtime.getManifest().version}</span>
       </div>
-      <p style={{ fontSize: '13px', color: '#94a3b8', margin: '0 0 16px 0' }}>
-        Capture & Intelligence Engine
+      <div style={rowStyle}>
+        <span>Service worker</span>
+        <span data-testid="worker-status">
+          {worker.kind === 'loading' ? 'Connecting…' : worker.kind === 'ok' ? 'Running' : `Error: ${worker.message}`}
+        </span>
+      </div>
+      <div style={rowStyle}>
+        <span>Tracking</span>
+        <span data-testid="tracking-status">Not available yet</span>
+      </div>
+      <p style={{ margin: '12px 0 0', fontSize: 12, opacity: 0.7 }}>
+        ChatGPT capture is not part of this build. Nothing is being recorded.
       </p>
-      <div style={{ padding: '12px', borderRadius: '8px', backgroundColor: '#1e293b', border: '1px solid #334155' }}>
-        <div style={{ fontSize: '12px', color: '#cbd5e1' }}>Status: {status}</div>
-        <div style={{ fontSize: '11px', color: '#64748b', marginTop: '4px' }}>Phase: P0 Foundation</div>
-      </div>
-    </div>
+    </main>
   );
-};
+}

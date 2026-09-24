@@ -1,0 +1,159 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "skillmirror-*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  PYTHON_VERSION: "3.13"
+  SUPABASE_CLI_VERSION: "2.117.0"
+
+jobs:
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: No environment files or build output tracked
+        run: |
+          bad=$(git ls-files | grep -E '(^|/)\.env($|\.)|(^|/)(node_modules|dist|\.next|\.venv|__pycache__)/|\.tsbuildinfo$' | grep -vE '\.env(\.e2e)?\.example$' || true)
+          if [ -n "$bad" ]; then echo "Tracked files that must not be committed:"; echo "$bad"; exit 1; fi
+      - name: No secret-looking values tracked
+        run: |
+          # Supabase secret keys, service-role JWTs, private keys.
+          if git grep -nIE 'sb_secret_[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|-----BEGIN [A-Z ]*PRIVATE KEY-----' -- . ':!*.test.ts'; then
+            echo "Possible secret committed"; exit 1
+          fi
+
+  backend:
+    name: Backend (FastAPI)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: services/backend/pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Test
+        run: python -m pytest
+
+  web:
+    name: Web (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Typecheck (web + shared packages)
+        run: |
+          npm run typecheck --workspace @skillmirror/web
+          npm run typecheck --workspace @skillmirror/contracts --workspace @skillmirror/config --workspace @skillmirror/ui
+      - name: Unit tests
+        run: npm run test:web
+      # Deliberately built without Supabase variables: the build must not
+      # need secrets, and no page may silently fall back to placeholders.
+      - name: Production build
+        run: npm run build:web
+
+  extension:
+    name: Extension (Chrome MV3)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck --workspace @skillmirror/extension
+      - name: Production build + manifest validation
+        run: npm run build:extension
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/extension
+      - name: Load unpacked in Chromium (service worker + popup)
+        run: npm run test:extension
+      - uses: actions/upload-artifact@v7
+        with:
+          name: skillmirror-extension-dist
+          path: apps/extension/dist
+          if-no-files-found: error
+
+  database:
+    name: Database (migrations + pgTAP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Start Postgres and apply migrations
+        run: supabase db start
+      - name: pgTAP tests (RLS, signup trigger, pgvector)
+        run: supabase test db
+
+  auth-e2e-local:
+    name: Auth round trip (local Supabase stack)
+    runs-on: ubuntu-latest
+    # Proves the auth code paths against a real Supabase Auth + Postgres stack
+    # started from this repository's migrations. It does NOT replace the gate
+    # against the hosted project (see docs/project-state.md).
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Start Supabase (auth, rest, db)
+        run: supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Export local Supabase connection values
+        run: |
+          supabase status -o env \
+            --override-name api.url=NEXT_PUBLIC_SUPABASE_URL \
+            --override-name auth.anon_key=NEXT_PUBLIC_SUPABASE_ANON_KEY \
+            --override-name auth.service_role_key=SUPABASE_SERVICE_ROLE_KEY \
+            | grep -E '^(NEXT_PUBLIC_SUPABASE_URL|NEXT_PUBLIC_SUPABASE_ANON_KEY|SUPABASE_SERVICE_ROLE_KEY)=' \
+            | sed -E 's/^([A-Z_]+)="(.*)"$/\1=\2/' > "$RUNNER_TEMP/supabase.env"
+          cut -d= -f1 "$RUNNER_TEMP/supabase.env"
+          test "$(wc -l < "$RUNNER_TEMP/supabase.env")" -eq 3
+          cat "$RUNNER_TEMP/supabase.env" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Build web against the local stack
+        run: npm run build:web
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Auth round trip
+        run: npm run e2e:auth
+        env:
+          E2E_WEB_COMMAND: npm run start
+          E2E_REQUIRE: "1"

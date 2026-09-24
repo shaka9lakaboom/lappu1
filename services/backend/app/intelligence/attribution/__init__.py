@@ -1,3 +1,1 @@
-"""
-Attribution engine placeholder (P0 baseline)
-"""
+"""Engine 08 - Contribution Attribution: STUDENT / AI / SHARED / UNKNOWN per skill. (P3)"""

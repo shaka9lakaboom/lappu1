@@ -1,3 +1,1 @@
-"""
-Model Gateway placeholder (P0 baseline - AI integration in later phases)
-"""
+"""ModelGateway: the single abstraction over generative and embedding providers. (P2+)"""

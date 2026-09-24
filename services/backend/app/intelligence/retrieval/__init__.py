@@ -1,3 +1,1 @@
-"""
-Retrieval engine placeholder (P0 baseline)
-"""
+"""Engine 07a - Candidate retrieval: lexical + pgvector semantic search. (P2)"""

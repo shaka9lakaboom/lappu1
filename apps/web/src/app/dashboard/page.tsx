@@ -1,85 +1,126 @@
-'use client';
+import type { HealthResponse, Profile } from '@skillmirror/contracts';
+import { redirect } from 'next/navigation';
 
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import { createClient } from '@/lib/supabase/client';
+import { signOut } from '@/app/auth/actions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 
-export default function DashboardPage() {
-  const router = useRouter();
-  const supabase = createClient();
-  const [user, setUser] = useState<any | null>(null);
-  const [loading, setLoading] = useState(true);
+type ApiStatus =
+  | { state: 'ok'; health: HealthResponse }
+  | { state: 'unconfigured' }
+  | { state: 'unreachable'; detail: string };
 
-  useEffect(() => {
-    async function loadUser() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push('/auth');
-      } else {
-        setUser(session.user);
-      }
-      setLoading(false);
-    }
-    loadUser();
-  }, [router, supabase]);
-
-  const handleSignOut = async () => {
-    await supabase.auth.signOut();
-    router.push('/auth');
-  };
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 p-4">
-        <div className="flex items-center space-x-3 text-slate-400">
-          <div className="h-5 w-5 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
-          <span>Loading authenticated session...</span>
-        </div>
-      </div>
-    );
+async function fetchApiStatus(): Promise<ApiStatus> {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
+  if (!baseUrl) return { state: 'unconfigured' };
+  try {
+    const response = await fetch(new URL('/health', baseUrl), {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) return { state: 'unreachable', detail: `HTTP ${response.status}` };
+    return { state: 'ok', health: (await response.json()) as HealthResponse };
+  } catch (error) {
+    return { state: 'unreachable', detail: error instanceof Error ? error.message : 'request failed' };
   }
+}
+
+function Field({ label, value, testId }: { label: string; value: string; testId: string }) {
+  return (
+    <div className="space-y-1">
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="break-all font-mono text-sm" data-testid={testId}>
+        {value}
+      </dd>
+    </div>
+  );
+}
+
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient();
+  // getUser() re-validates the session with the Supabase Auth server.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) redirect('/sign-in?next=/dashboard');
+
+  const [{ data: profile, error: profileError }, apiStatus] = await Promise.all([
+    supabase
+      .from('profiles')
+      .select('id, role, display_name, timezone, created_at, updated_at')
+      .eq('id', user.id)
+      .maybeSingle<Profile>(),
+    fetchApiStatus(),
+  ]);
 
   return (
-    <div className="min-h-screen bg-slate-950 p-6 md:p-12 text-slate-100">
-      <div className="max-w-4xl mx-auto space-y-8">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-6">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">SkillMirror Dashboard</h1>
-            <p className="text-sm text-slate-400 mt-1">P0 Foundation Verified — Session Active</p>
-          </div>
-          <Button variant="outline" onClick={handleSignOut}>
-            Sign Out
-          </Button>
+    <main className="mx-auto max-w-3xl space-y-6 px-6 py-12">
+      <header className="flex items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
+            Signed in as <span data-testid="user-email">{user.email}</span>
+          </p>
         </div>
+        <form action={signOut}>
+          <Button type="submit" variant="outline">
+            Sign out
+          </Button>
+        </form>
+      </header>
 
-        <Card className="border-slate-800 bg-slate-900/80">
-          <CardHeader>
-            <CardTitle className="text-xl">Authentication Round-Trip State</CardTitle>
-            <CardDescription className="text-slate-400">
-              Verified active session surviving navigation
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="p-4 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-xs text-slate-400 font-mono uppercase">User ID</span>
-                <p className="text-sm font-mono text-slate-200 mt-1 truncate">{user?.id}</p>
-              </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>
+            Identity verified by Supabase Auth; profile read through row-level security.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {profileError ? (
+            <p role="alert" className="text-sm text-destructive">
+              Could not load profile: {profileError.message}
+            </p>
+          ) : !profile ? (
+            <p role="alert" className="text-sm text-destructive">
+              No profile row exists for this user. Has migration 0001_p0_foundation been applied?
+            </p>
+          ) : (
+            <dl className="grid gap-4 sm:grid-cols-2">
+              <Field label="User ID" value={user.id} testId="user-id" />
+              <Field label="Role" value={profile.role} testId="profile-role" />
+              <Field label="Display name" value={profile.display_name ?? '—'} testId="profile-display-name" />
+              <Field label="Timezone" value={profile.timezone} testId="profile-timezone" />
+              <Field label="Profile created" value={profile.created_at} testId="profile-created-at" />
+            </dl>
+          )}
+        </CardContent>
+      </Card>
 
-              <div className="p-4 rounded-lg bg-slate-950 border border-slate-800">
-                <span className="text-xs text-slate-400 font-mono uppercase">Email Address</span>
-                <p className="text-sm font-mono text-slate-200 mt-1">{user?.email}</p>
-              </div>
-            </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Backend API</CardTitle>
+          <CardDescription>Live result of GET /health on NEXT_PUBLIC_API_URL.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm" data-testid="api-status">
+          {apiStatus.state === 'ok' ? (
+            <span>
+              {apiStatus.health.status} · {apiStatus.health.service} {apiStatus.health.version} (
+              {apiStatus.health.environment})
+            </span>
+          ) : apiStatus.state === 'unconfigured' ? (
+            <span className="text-muted-foreground">NEXT_PUBLIC_API_URL is not set.</span>
+          ) : (
+            <span className="text-destructive">Unreachable: {apiStatus.detail}</span>
+          )}
+        </CardContent>
+      </Card>
 
-            <div className="p-4 rounded-lg bg-emerald-950/40 border border-emerald-800/60 text-emerald-300 text-xs">
-              ✓ Supabase Auth session active and loaded successfully into Next.js App Router context.
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+      <p className="text-sm text-muted-foreground">
+        Courses, skills and evidence will appear here once capture and processing exist. Nothing is shown
+        until there is real evidence.
+      </p>
+    </main>
   );
 }

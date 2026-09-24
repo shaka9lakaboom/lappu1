@@ -1,34 +1,33 @@
-import { createServerClient, type CookieOptions } from '@supabase/ssr';
+import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 
-export function createClient() {
-  const cookieStore = cookies();
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://placeholder.supabase.co';
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+import { readSupabasePublicEnv } from './env';
 
-  return createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        get(name: string) {
-          return cookieStore.get(name)?.value;
-        },
-        set(name: string, value: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value, ...options });
-          } catch (error) {
-            // Called from Server Component
-          }
-        },
-        remove(name: string, options: CookieOptions) {
-          try {
-            cookieStore.set({ name, value: '', ...options });
-          } catch (error) {
-            // Called from Server Component
-          }
-        },
+/**
+ * Supabase client for Server Components, Server Actions and Route Handlers.
+ * Create one per request; never share it between requests.
+ */
+export async function createSupabaseServerClient() {
+  // Read cookies first: it marks the route as request-time rendered, so no
+  // session-dependent page is ever prerendered at build time.
+  const cookieStore = await cookies();
+  const { url, anonKey } = readSupabasePublicEnv();
+
+  return createServerClient(url, anonKey, {
+    cookies: {
+      getAll() {
+        return cookieStore.getAll();
       },
-    }
-  );
+      setAll(cookiesToSet) {
+        try {
+          for (const { name, value, options } of cookiesToSet) {
+            cookieStore.set(name, value, options);
+          }
+        } catch {
+          // Server Components cannot set cookies. The proxy refreshes the
+          // session on every request, so this is safe to ignore there.
+        }
+      },
+    },
+  });
 }

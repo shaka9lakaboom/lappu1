@@ -1,3 +1,1 @@
-"""
-Ingestion module placeholder (P0 baseline - execution in P1)
-"""
+"""Engine 01 - Activity Ingestion: accept normalized provider events; never infer skills. (P1)"""
