@@ -7,7 +7,8 @@
     "build": "node build.mjs && node scripts/validate-manifest.mjs",
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
-    "test:unit": "vitest run"
+    "test:unit": "vitest run",
+    "acceptance:live": "playwright test --config playwright.live.config.ts"
   },
   "dependencies": {
     "@skillmirror/config": "0.1.0",
