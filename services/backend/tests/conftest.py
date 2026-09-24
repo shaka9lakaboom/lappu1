@@ -191,3 +191,58 @@ def count_rows(pool, table: str, learner_id: UUID) -> int:
             (learner_id,),
         ).fetchone()
     return count
+
+
+# --- P2/P3A registry + job helpers (integration) ----------------------------
+
+
+@pytest.fixture
+def registry(db_pool) -> Iterator[str]:
+    """A unique name prefix for registry rows created by one test; they are removed afterwards.
+
+    Request it BEFORE `new_learner` so it tears down after the learners (and their
+    analysis rows) are gone."""
+    prefix = f"Zq{uuid4().hex[:8]} "
+    yield prefix
+    pattern = f"{prefix}%"
+    with db_pool.connection() as conn:
+        ids = [
+            r[0]
+            for r in conn.execute(
+                "select id from public.skill_nodes where canonical_name like %s", (pattern,)
+            ).fetchall()
+        ]
+        conn.execute(
+            "delete from public.skill_candidates where canonical_name like %s "
+            "or parent_candidate_id = any(%s) or resolved_skill_id = any(%s)",
+            (pattern, ids, ids),
+        )
+        if ids:
+            conn.execute("delete from public.skill_mappings where skill_id = any(%s)", (ids,))
+            conn.execute("delete from public.course_skills where skill_id = any(%s)", (ids,))
+            conn.execute(
+                "delete from public.skill_edges where from_skill_id = any(%s) or to_skill_id = any(%s)",
+                (ids, ids),
+            )
+            conn.execute("delete from public.skill_embeddings where skill_id = any(%s)", (ids,))
+            conn.execute(
+                "update public.skill_nodes set status = 'DEPRECATED', merged_into_id = null "
+                "where merged_into_id = any(%s)",
+                (ids,),
+            )
+            conn.execute("delete from public.skill_aliases where skill_id = any(%s)", (ids,))
+            conn.execute("delete from public.skill_nodes where id = any(%s)", (ids,))
+
+
+def job_for(pool, entity_id: UUID, job_type: str):
+    """The job row for an entity, as the worker would have claimed it (state untouched)."""
+    from app.jobs.queue import ClaimedJob
+
+    with pool.connection() as conn:
+        row = conn.execute(
+            "select id, job_type, entity_type, entity_id, learner_id, attempts, max_attempts "
+            "from public.processing_jobs where entity_id = %s and job_type = %s",
+            (entity_id, job_type),
+        ).fetchone()
+    assert row is not None, f"no {job_type} job for {entity_id}"
+    return ClaimedJob(*row)
