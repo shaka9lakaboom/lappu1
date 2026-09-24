@@ -28,7 +28,10 @@ PARITY = {
     "SEGMENT_ROUTES": (get_args(contracts.SegmentRoute), "segment_route"),
     "MAPPING_OUTCOMES": (get_args(contracts.MappingOutcome), "mapping_outcome"),
     "SKILL_MAPPING_STATUSES": (get_args(contracts.SkillMappingStatus), "skill_mapping_status"),
-    "SKILL_CANDIDATE_STATUSES": (get_args(contracts.SkillCandidateStatus), "skill_candidate_status"),
+    "SKILL_CANDIDATE_STATUSES": (
+        get_args(contracts.SkillCandidateStatus),
+        "skill_candidate_status",
+    ),
     "MODEL_RUN_STATUSES": (tuple(s.value for s in ModelRunStatus), "model_run_status"),
 }
 
