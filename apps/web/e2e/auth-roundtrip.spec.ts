@@ -1,9 +1,9 @@
 /**
  * P0 exit gate: real Supabase authentication round trip.
  *
- *   sign up -> auth user created -> profile created -> session established
- *   -> protected dashboard -> refresh keeps session -> sign out removes session
- *   -> sign in again -> sign out
+ *   sign up -> auth user created -> STUDENT profile created -> session established
+ *   -> protected dashboard -> client cannot self-promote role -> refresh keeps
+ *   session -> sign out removes session -> sign in again -> sign out -> cleanup
  *
  * Runs against a REAL Supabase project. Requires NEXT_PUBLIC_SUPABASE_URL and
  * NEXT_PUBLIC_SUPABASE_ANON_KEY (apps/web/.env.local) plus
@@ -13,6 +13,11 @@
  *
  * The project must have "Confirm email" disabled, or this test cannot
  * complete signup without an inbox.
+ *
+ * Test addresses default to @mailinator.com: hosted Supabase Auth rejects
+ * domains that cannot receive mail (example.com has a null MX record). No mail
+ * is sent while confirmation is disabled, and the user is always deleted.
+ * After an aborted run, `node e2e/cleanup-test-users.mjs` removes leftovers.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { expect, test, type Page } from '@playwright/test';
@@ -37,7 +42,7 @@ test('sign up, persist, sign out, sign in, sign out', async ({ page }) => {
   const admin: SupabaseClient = createClient(url!, serviceRoleKey!, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const email = `skillmirror-p0-${Date.now()}@${process.env.E2E_EMAIL_DOMAIN ?? 'example.com'}`;
+  const email = `skillmirror-p0-${Date.now()}@${process.env.E2E_EMAIL_DOMAIN ?? 'mailinator.com'}`;
   const password = `P0-${crypto.randomUUID()}`;
   const displayName = 'P0 Round Trip';
   let userId: string | undefined;
@@ -83,6 +88,19 @@ test('sign up, persist, sign out, sign in, sign out', async ({ page }) => {
     await expect(page.getByTestId('profile-role')).toHaveText('STUDENT');
     await expect(page.getByTestId('profile-display-name')).toHaveText(displayName);
 
+    // 4b. A client holding the user's own session cannot self-promote.
+    const userClient = createClient(url!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { error: clientSignInError } = await userClient.auth.signInWithPassword({ email, password });
+    expect(clientSignInError).toBeNull();
+    const { error: promoteError } = await userClient.from('profiles').update({ role: 'ADMIN' }).eq('id', userId!);
+    expect(promoteError?.code, 'role update must be rejected with permission denied').toBe('42501');
+    const { data: ownProfile } = await userClient.from('profiles').select('role').eq('id', userId!).single();
+    expect(ownProfile?.role).toBe('STUDENT');
+    // Revoke only this API session, not the browser session under test.
+    await userClient.auth.signOut({ scope: 'local' });
+
     // 5. Refresh keeps the same session.
     await page.reload();
     await expect(page).toHaveURL(/\/dashboard$/);
@@ -105,9 +123,17 @@ test('sign up, persist, sign out, sign in, sign out', async ({ page }) => {
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page).toHaveURL(/\/sign-in$/);
   } finally {
+    // The account may exist even if the test stopped before reading its id
+    // (e.g. signup succeeded but returned no session), so fall back to email.
+    if (!userId) {
+      const { data } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      userId = data?.users.find((user) => user.email === email)?.id;
+    }
     if (userId) {
       const { error } = await admin.auth.admin.deleteUser(userId);
       expect(error, 'cleanup: delete test user').toBeNull();
+      const { data: remaining } = await admin.auth.admin.getUserById(userId);
+      expect(remaining.user, 'cleanup: test user is gone').toBeNull();
     }
   }
 });

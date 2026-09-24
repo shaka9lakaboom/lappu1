@@ -111,11 +111,18 @@ npm run e2e:auth          # real Supabase auth round trip (see below)
 ### Auth round-trip test
 
 `apps/web/e2e/auth-roundtrip.spec.ts` drives the real UI: sign up → dashboard → refresh →
-sign out → sign in → sign out, and checks the Auth user and `profiles` row server-side.
-It needs `apps/web/.env.local` plus `SUPABASE_SERVICE_ROLE_KEY` in
-`apps/web/.env.e2e.local` (template: `apps/web/.env.e2e.example`), and "Confirm email"
-disabled on the project. It deletes the user it creates. Without configuration it is
-skipped, never passed.
+sign out → sign in → sign out. It checks the Auth user and `profiles` row server-side, and
+checks that a user's own API session cannot change its role. It needs:
+
+- `apps/web/.env.local`
+- `SUPABASE_SERVICE_ROLE_KEY` in `apps/web/.env.e2e.local` (template: `apps/web/.env.e2e.example`)
+- email signups auto-confirmed on the project (Auth config `mailer_autoconfirm = true`,
+  shown as "Confirm email" off where the dashboard exposes it)
+
+Test addresses use `@mailinator.com` by default (override with `E2E_EMAIL_DOMAIN`), because
+hosted Auth rejects domains that cannot receive mail. The test deletes the user it creates;
+after an aborted run, `node e2e/cleanup-test-users.mjs` (from `apps/web`) removes leftovers.
+Without configuration the test is skipped, never passed.
 
 ## CI
 
