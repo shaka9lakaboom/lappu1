@@ -17,7 +17,7 @@
  * the exact same envelopes twice -> row count unchanged.
  * Evidence is written to $ACCEPTANCE_OUT (default: test-results/acceptance).
  */
-import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, execSync, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -79,11 +79,8 @@ function serviceCount(learnerId: string): { raw_messages: number; conversations:
     `select (select count(*) from public.raw_messages where learner_id = '${learnerId}') as raw_messages, ` +
     `(select count(*) from public.conversations where learner_id = '${learnerId}') as conversations, ` +
     `(select count(*) from public.processing_jobs where learner_id = '${learnerId}') as processing_jobs`;
-  const text = execFileSync('npx', ['supabase@2.117.0', 'db', 'query', '--linked', sql], {
-    cwd: repo,
-    encoding: 'utf8',
-    shell: process.platform === 'win32',
-  });
+  // One quoted argument: the SQL has single quotes only, and a shell is needed for npx on Windows.
+  const text = execSync(`npx supabase@2.117.0 db query --linked "${sql}"`, { cwd: repo, encoding: 'utf8' });
   const [row] = JSON.parse(text.slice(text.indexOf('{'))).rows as Array<Record<string, number>>;
   return { raw_messages: Number(row.raw_messages), conversations: Number(row.conversations), processing_jobs: Number(row.processing_jobs) };
 }
