@@ -52,6 +52,23 @@ class Settings(BaseSettings):
     # ingestion. Without it, database-backed endpoints fail closed with 503.
     database_url: SecretStr | None = None
 
+    # Google AI (architecture §14.1). Server-only; never sent to web or extension.
+    # Without it the model gateway is unavailable and the worker stays idle.
+    gemini_api_key: SecretStr | None = None
+    gemini_generation_model: str = Field(default="gemini-3.7-flash", min_length=1, max_length=100)
+    gemini_embedding_model: str = Field(default="gemini-embedding-2", min_length=1, max_length=100)
+    # low | medium | high (gemini-3.7-flash does not accept "minimal").
+    gemini_thinking_level: Literal["low", "medium", "high"] = "low"
+    model_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+
+    # In-process durable worker loop (architecture §7.3). It starts with the API
+    # when DATABASE_URL and GEMINI_API_KEY are set and APP_ENV is not "test".
+    worker_enabled: bool = True
+    worker_poll_seconds: float = Field(default=2.0, gt=0, le=60)
+    worker_batch_size: int = Field(default=4, ge=1, le=50)
+    # PROCESSING jobs whose lock is older than this are recovered (crash recovery).
+    worker_stale_after_seconds: int = Field(default=900, ge=60, le=86400)
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
@@ -85,6 +102,7 @@ class Settings(BaseSettings):
         "supabase_service_role_key",
         "supabase_jwt_secret",
         "database_url",
+        "gemini_api_key",
         mode="before",
     )
     @classmethod
