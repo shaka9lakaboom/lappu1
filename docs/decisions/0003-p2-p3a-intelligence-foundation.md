@@ -155,4 +155,27 @@
     is scored by `benchmark/runners/p3a_smoke.py` against the live model. CI validates only the
     files and the scorer. The 120-case gate set remains P8.
 26. **Lint.** Ruff's line-length rule is relaxed for `app/intelligence/**` (natural-language
-    prompts) and `tests/**` (literal SQL).
+    prompts), `tests/**` (literal SQL) and `scripts/**` (manual acceptance script).
+
+## Found in the first live run (2026-09-25)
+
+27. **Provider schemas omit array bounds.** Gemini rejects our schemas with HTTP 400
+    ("invalid argument") when `minItems`/`maxItems` are combined with enums: they exceed its
+    schema-complexity limit. A live bisect showed that removing either one fixes it. The enums
+    guide the model, so the array bounds go. The provider schema keeps only documented keywords
+    (no `pattern`, `minLength`, `maxLength`). Pydantic enforces everything, and violations use the
+    repair call.
+28. **Provider backpressure never fails a job.** A 429 (quota) or 503 (overload) is a transient
+    gateway error that carries the server's `retryDelay`. The worker defers the job
+    (`MODEL_BACKPRESSURE`, delay clamped to 15–600 s) without spending an attempt, so it stays
+    pending until capacity returns (§16 "leave durable job pending", raw data safe). Other
+    provider errors (400, 401/403, 404, timeouts) still count as attempts. Optional client-side
+    limits `GEMINI_GENERATION_RPM` / `GEMINI_EMBEDDING_RPM` (off by default) keep a free-tier
+    project under its per-minute quota.
+29. **Reason codes are normalized, not rejected.** Model reason codes are folded to UPPER_SNAKE
+    before strict validation (for example `programming_question` → `PROGRAMMING_QUESTION`).
+    Casing is not worth a repair call. Non-strings are still invalid.
+30. **Free-tier quota reality.** This project's Gemini key is on the free tier: 20 generation
+    requests/day and 5/minute per project and model. The frozen default stays `gemini-3.7-flash`.
+    Only for the 2026-09-25 live acceptance, the owner approved `GEMINI_GENERATION_MODEL=gemini-3.8-flash`,
+    set in the process environment. No default, template or policy changed.

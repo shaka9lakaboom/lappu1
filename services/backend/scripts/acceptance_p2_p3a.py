@@ -6,6 +6,12 @@ migration 0003 on the target database, and apps/web/.env.local (public Supabase 
     cd services/backend
     .venv/Scripts/python scripts/acceptance_p2_p3a.py --out ../../apps/extension/test-results/p2-p3a-evidence.json
 
+Resume an earlier run (reuse its course instead of generating a new graph; the
+throwaway learner's password is never stored, so the turn is ingested through the same
+ingestion service the API handler calls):
+
+    .venv/Scripts/python scripts/acceptance_p2_p3a.py --resume-course <course uuid>
+
 Steps: sign up a fresh learner (public Auth API) -> POST /v1/courses -> wait for the
 bootstrap job (graph READY) -> inspect skills + embeddings -> real retrieval query ->
 send a real learning turn through POST /v1/events/batch -> wait for processing ->
@@ -28,10 +34,20 @@ BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
 
 from app.core.config import get_settings  # noqa: E402
+from app.courses.service import get_course, get_course_skills  # noqa: E402
 from app.db.pool import create_pool  # noqa: E402
 from app.ingestion.fingerprint import content_hash  # noqa: E402
+from app.ingestion.models import EventBatchClientInfo, RawActivityEnvelope  # noqa: E402
+from app.ingestion.service import ingest_batch  # noqa: E402
 from app.intelligence.policy import load_policy  # noqa: E402
-from app.intelligence.retrieval.engine import retrieve_candidates  # noqa: E402
+from app.intelligence.retrieval.engine import (  # noqa: E402
+    QUERY_INPUT_VERSION,
+    QUERY_TASK_TYPE,
+    fetch_raw_candidates,
+    retrieve_candidates,
+    to_contract,
+)
+from app.intelligence.retrieval.scoring import score_candidates  # noqa: E402
 from app.model_gateway import RunContext, build_gateway  # noqa: E402
 
 WEB_ENV = BACKEND.parents[1] / "apps" / "web" / ".env.local"
@@ -71,7 +87,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="SkillMirror P2 + P3A real acceptance")
     parser.add_argument("--api", default="http://localhost:8000")
     parser.add_argument("--out", type=Path, default=None)
-    parser.add_argument("--timeout", type=float, default=600)
+    parser.add_argument("--timeout", type=float, default=900)
+    parser.add_argument(
+        "--rerank-probe",
+        action="store_true",
+        help="also rerank the probe query (one extra generation call); by default the "
+        "rerank is verified on the real turn only, to save free-tier quota",
+    )
+    parser.add_argument(
+        "--resume-course",
+        default=None,
+        help="reuse an existing course (and its owner) from an earlier run",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -87,44 +114,72 @@ def main() -> int:
     health = http.get(f"{args.api}/health").json()
     print(f"[1] backend {health['service']} {health['version']} ({health['environment']})")
 
-    email = f"skillmirror-p2-{int(time.time())}@mailinator.com"
-    signup = http.post(
-        f"{supabase_url}/auth/v1/signup",
-        headers={"apikey": anon, "Content-Type": "application/json"},
-        json={"email": email, "password": secrets.token_urlsafe(18)},
-    )
-    signup.raise_for_status()
-    session = signup.json()
-    token = session.get("access_token")
-    if not token:
-        raise SystemExit("signup returned no session (is email auto-confirm on?)")
-    learner = session["user"]["id"]
-    auth = {"Authorization": f"Bearer {token}"}
-    evidence["learner"] = {"email": email, "id": learner}
-    print(f"[2] learner {email} ({learner})")
+    token = None
+    if args.resume_course:
+        course_id = args.resume_course
+        with pool.connection() as conn:
+            row = conn.execute(
+                "select owner_id::text from public.courses where id = %s", (course_id,)
+            ).fetchone()
+        if row is None:
+            raise SystemExit(f"course {course_id} not found")
+        learner = row[0]
+        evidence["learner"] = {"id": learner, "resumed": True}
+        print(f"[2] resuming course {course_id} of learner {learner}")
+        print("[3] (course created in the earlier run)")
 
-    created = http.post(
-        f"{args.api}/v1/courses",
-        headers={**auth, "Idempotency-Key": f"acceptance-{uuid.uuid4().hex}"},
-        json=COURSE,
-    )
-    assert created.status_code == 201, created.text
-    course_id = created.json()["course"]["id"]
-    with pool.connection() as conn:
-        runs_at_create = conn.execute(
-            "select count(*) from public.model_runs where course_id = %s", (course_id,)
-        ).fetchone()[0]
-    print(f"[3] course {course_id} created (201); model runs during request: {runs_at_create}")
+        def course_done():
+            with pool.connection() as conn:
+                course = get_course(conn, uuid.UUID(learner), uuid.UUID(course_id))
+            print(f"    graph_status={course.graph_status} job={course.bootstrap_job_state}")
+            return course if course.graph_status in ("READY", "FAILED") else None
 
-    def course_done():
-        course = http.get(f"{args.api}/v1/courses/{course_id}", headers=auth).json()
-        print(f"    graph_status={course['graph_status']} job={course['bootstrap_job_state']}")
-        return course if course["graph_status"] in ("READY", "FAILED") else None
+        course = wait("course bootstrap", course_done, args.timeout)
+        if course.graph_status != "READY":
+            raise SystemExit(f"bootstrap failed: {course.graph_error}")
+        with pool.connection() as conn:
+            graph = get_course_skills(conn, uuid.UUID(learner), uuid.UUID(course_id)).model_dump(
+                mode="json"
+            )
+    else:
+        email = f"skillmirror-p2-{int(time.time())}@mailinator.com"
+        signup = http.post(
+            f"{supabase_url}/auth/v1/signup",
+            headers={"apikey": anon, "Content-Type": "application/json"},
+            json={"email": email, "password": secrets.token_urlsafe(18)},
+        )
+        signup.raise_for_status()
+        session = signup.json()
+        token = session.get("access_token")
+        if not token:
+            raise SystemExit("signup returned no session (is email auto-confirm on?)")
+        learner = session["user"]["id"]
+        auth = {"Authorization": f"Bearer {token}"}
+        evidence["learner"] = {"email": email, "id": learner}
+        print(f"[2] learner {email} ({learner})")
 
-    course = wait("course bootstrap", course_done, args.timeout)
-    if course["graph_status"] != "READY":
-        raise SystemExit(f"bootstrap failed: {course['graph_error']}")
-    graph = http.get(f"{args.api}/v1/courses/{course_id}/skills", headers=auth).json()
+        created = http.post(
+            f"{args.api}/v1/courses",
+            headers={**auth, "Idempotency-Key": f"acceptance-{uuid.uuid4().hex}"},
+            json=COURSE,
+        )
+        assert created.status_code == 201, created.text
+        course_id = created.json()["course"]["id"]
+        with pool.connection() as conn:
+            runs_at_create = conn.execute(
+                "select count(*) from public.model_runs where course_id = %s", (course_id,)
+            ).fetchone()[0]
+        print(f"[3] course {course_id} created (201); model runs during request: {runs_at_create}")
+
+        def course_done():
+            course = http.get(f"{args.api}/v1/courses/{course_id}", headers=auth).json()
+            print(f"    graph_status={course['graph_status']} job={course['bootstrap_job_state']}")
+            return course if course["graph_status"] in ("READY", "FAILED") else None
+
+        course = wait("course bootstrap", course_done, args.timeout)
+        if course["graph_status"] != "READY":
+            raise SystemExit(f"bootstrap failed: {course['graph_error']}")
+        graph = http.get(f"{args.api}/v1/courses/{course_id}/skills", headers=auth).json()
     skills = [s for s in graph["skills"] if s["skill"]["node_kind"] in ("SKILL", "SUBSKILL")]
     topics = [s for s in graph["skills"] if s["skill"]["node_kind"] == "TOPIC"]
     with pool.connection() as conn:
@@ -164,32 +219,56 @@ def main() -> int:
     }
 
     gateway = build_gateway(settings, pool)
+    probe_ctx = RunContext(trace_id=f"acceptance:retrieval:{course_id}")
     with pool.connection() as conn:
         policy = load_policy(conn)
-        retrieval = retrieve_candidates(
-            conn,
-            gateway,
-            query_text=QUERY,
-            course_ids=[uuid.UUID(course_id)],
-            course_context="Introduction to Python Programming (Beginner)",
-            policy=policy.retrieval,
-            context=RunContext(trace_id=f"acceptance:retrieval:{course_id}"),
-        )
-    by_id = {c.skill_id: c for c in retrieval.candidates}
-    top8 = [by_id[i] for i in retrieval.reranked_ids]
+        if args.rerank_probe:
+            retrieval = retrieve_candidates(
+                conn,
+                gateway,
+                query_text=QUERY,
+                course_ids=[uuid.UUID(course_id)],
+                course_context="Introduction to Python Programming (Beginner)",
+                policy=policy.retrieval,
+                context=probe_ctx,
+            )
+            pool_candidates = list(retrieval.candidates)
+        else:
+            # Both retrieval channels + exact scoring; no generation call (embedding only).
+            embedded = gateway.embed(
+                texts=[QUERY],
+                input_type="query",
+                prompt_version=QUERY_INPUT_VERSION,
+                task_type=QUERY_TASK_TYPE,
+                context=probe_ctx,
+            )
+            raw = fetch_raw_candidates(
+                conn,
+                query_text=QUERY,
+                query_vector=embedded.vectors[0],
+                course_ids=[uuid.UUID(course_id)],
+                embedding_model=embedded.model,
+                channel_limit=policy.retrieval.channel_limit,
+            )
+            pool_candidates = to_contract(
+                score_candidates(raw, policy.retrieval.weights, policy.retrieval.pool_size)
+            )
+    lexical_hits = sum(1 for c in pool_candidates if c.lexical_score > 0)
     print(
-        f"[5] retrieval for {QUERY!r}: pool {len(retrieval.candidates)}, reranked top {len(top8)}"
+        f"[5] retrieval for {QUERY!r}: pool {len(pool_candidates)} "
+        f"(lexical matches {lexical_hits}, all scored by pgvector cosine)"
     )
-    for c in top8:
+    for c in pool_candidates[:10]:
         print(
             f"    {c.rank:>2} {c.canonical_name} score={c.candidate_score:.3f} "
             f"sem={c.semantic_similarity:.3f} lex={c.lexical_score:.3f} prior={c.course_context_prior:.2f}"
         )
     evidence["retrieval"] = {
         "query": QUERY,
-        "pool": len(retrieval.candidates),
-        "top8": [c.model_dump(mode="json") for c in top8],
-        "rerank_fallback": retrieval.rerank_fallback,
+        "pool": len(pool_candidates),
+        "lexical_matches": lexical_hits,
+        "top10": [c.model_dump(mode="json") for c in pool_candidates[:10]],
+        "reranked_in_probe": bool(args.rerank_probe),
     }
 
     conversation = f"acceptance-{uuid.uuid4().hex[:12]}"
@@ -228,10 +307,26 @@ def main() -> int:
             envelope(assistant_ext, user_ext, 1, "assistant", ASSISTANT_TURN),
         ],
     }
-    ingested = http.post(f"{args.api}/v1/events/batch", headers=auth, json=batch)
-    ingested.raise_for_status()
-    raw_ids = [r["raw_message_id"] for r in ingested.json()["results"]]
-    print(f"[6] turn ingested: raw messages {raw_ids}")
+    if token:
+        ingested = http.post(
+            f"{args.api}/v1/events/batch",
+            headers={"Authorization": f"Bearer {token}"},
+            json=batch,
+        )
+        ingested.raise_for_status()
+        raw_ids = [r["raw_message_id"] for r in ingested.json()["results"]]
+        via = "POST /v1/events/batch"
+    else:
+        with pool.connection() as conn:
+            stored = ingest_batch(
+                conn,
+                uuid.UUID(learner),
+                [RawActivityEnvelope.model_validate(e) for e in batch["events"]],
+                EventBatchClientInfo.model_validate(batch["client"]),
+            )
+        raw_ids = [str(r.raw_message_id) for r in stored]
+        via = "ingestion service"
+    print(f"[6] turn ingested via {via}: raw messages {raw_ids}")
 
     def jobs_done():
         with pool.connection() as conn:

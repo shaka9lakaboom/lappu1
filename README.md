@@ -77,6 +77,7 @@ cp services/backend/.env.example services/backend/.env
 | `DATABASE_URL` | backend | Postgres connection string (Supabase session pooler). Server only. |
 | `GEMINI_API_KEY` | backend | Google AI key. Server only. Without it the worker stays idle and jobs stay `PENDING`. |
 | `GEMINI_GENERATION_MODEL`, `GEMINI_EMBEDDING_MODEL` | backend | Defaults `gemini-3.7-flash`, `gemini-embedding-2` (768 dims). |
+| `GEMINI_GENERATION_RPM`, `GEMINI_EMBEDDING_RPM` | backend | Optional client-side request limits per minute (free tier: 5 RPM generation). 429/503 never fail a job; it is deferred. |
 | `WORKER_ENABLED` | backend | In-process worker loop (default `true`); `false` to run `python -m app.jobs.worker` separately. |
 
 The service-role key and the Gemini API key must never appear in web or extension code.
