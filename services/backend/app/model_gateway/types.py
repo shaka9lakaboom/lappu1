@@ -117,10 +117,19 @@ ProviderErrorKind = Literal["timeout", "rate_limited", "unavailable", "failed"]
 class ProviderError(Exception):
     """Raised by provider adapters; the gateway maps it to a model_runs status."""
 
-    def __init__(self, kind: ProviderErrorKind, code: str, message: str = "") -> None:
+    def __init__(
+        self,
+        kind: ProviderErrorKind,
+        code: str,
+        message: str = "",
+        *,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message or code)
         self.kind = kind
         self.code = code
+        # Seconds the provider asked us to wait (e.g. a 429 RetryInfo), if any.
+        self.retry_after = retry_after
 
 
 class ModelProviderProtocol(Protocol):
@@ -154,11 +163,23 @@ class ModelProviderProtocol(Protocol):
 
 
 class ModelGatewayError(Exception):
-    """Base class. `runs` holds the model_runs records of the failed call(s)."""
+    """Base class. `runs` holds the model_runs records of the failed call(s).
 
-    def __init__(self, message: str, runs: tuple[ModelRun, ...] = ()) -> None:
+    `transient` marks provider backpressure (rate limit, temporary overload): the
+    work should be retried later without counting as a failed attempt."""
+
+    def __init__(
+        self,
+        message: str,
+        runs: tuple[ModelRun, ...] = (),
+        *,
+        transient: bool = False,
+        retry_after: float | None = None,
+    ) -> None:
         super().__init__(message)
         self.runs = runs
+        self.transient = transient
+        self.retry_after = retry_after
 
 
 class ModelUnavailableError(ModelGatewayError):

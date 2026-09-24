@@ -536,22 +536,47 @@ def test_orphan_assistant_and_superseded_revisions_are_skipped(
     assert run(stored[1].raw_message_id).outcome == "SUPERSEDED_REVISION"
 
 
+@pytest.mark.parametrize(
+    ("error", "state", "attempts", "outcome", "run_status"),
+    [
+        # Provider backpressure: deferred, no attempt spent, the job stays pending.
+        (
+            ProviderError("unavailable", "HTTP_503"),
+            "PENDING",
+            0,
+            "MODEL_BACKPRESSURE",
+            "UNAVAILABLE",
+        ),
+        (
+            ProviderError("rate_limited", "HTTP_429", retry_after=30),
+            "PENDING",
+            0,
+            "MODEL_BACKPRESSURE",
+            "RATE_LIMITED",
+        ),
+        # A real provider failure is a failed attempt with backoff.
+        (ProviderError("failed", "HTTP_500"), "RETRY_WAIT", 1, None, "FAILED"),
+    ],
+)
 def test_model_outage_leaves_the_job_retryable_and_raw_data_safe(
-    db_pool, registry, new_learner
+    db_pool, registry, new_learner, error, state, attempts, outcome, run_status
 ) -> None:
     learner = new_learner()
     user_id, assistant_id = ingest_turn(db_pool, learner, LOOP_QUESTION)
-    provider = FakeProvider(route_responder(qualification=ProviderError("unavailable", "HTTP_503")))
+    provider = FakeProvider(route_responder(qualification=error))
     worker = build_worker(db_pool, gateway_for(db_pool, provider), batch_size=10)
     worker.drain()
-    states = dict(
-        fetch(
+    jobs = {
+        row[0]: row[1:]
+        for row in fetch(
             db_pool,
-            "select entity_id, state::text from public.processing_jobs where learner_id = %s",
+            "select entity_id, state::text, attempts, outcome from public.processing_jobs "
+            "where learner_id = %s",
             learner,
         )
-    )
-    assert states[assistant_id] == "RETRY_WAIT" and states[user_id] == "COMPLETED"
+    }
+    assert jobs[assistant_id] == (state, attempts, outcome)
+    assert jobs[user_id][0] == "COMPLETED"
     assert fetch(
         db_pool, "select count(*) from public.activity_segments where learner_id = %s", learner
     ) == [(0,)]
@@ -560,4 +585,4 @@ def test_model_outage_leaves_the_job_retryable_and_raw_data_safe(
     ) == [(2,)]
     assert fetch(
         db_pool, "select status::text from public.model_runs where learner_id = %s", learner
-    ) == [("UNAVAILABLE",)]
+    ) == [(run_status,)]

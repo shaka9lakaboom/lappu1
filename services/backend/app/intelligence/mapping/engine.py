@@ -18,9 +18,9 @@ from dataclasses import dataclass, field
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from app.intelligence.contracts import NewSkillCandidate, SkillCandidate
+from app.intelligence.contracts import NewSkillCandidate, SkillCandidate, normalize_reason_code
 from app.intelligence.mapping.gate import gate
 from app.intelligence.policy import MappingPolicy
 from app.intelligence.retrieval.rerank import format_candidates
@@ -70,6 +70,8 @@ class Adjudication(BaseModel):
     verdict: Literal["CONFIRM", "REJECT", "UNRESOLVED"]
     confidence: float = Field(ge=0, le=1)
     reason_code: Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]{1,63}$")]
+
+    _fold_reason_code = field_validator("reason_code", mode="before")(normalize_reason_code)
 
 
 class AdjudicationOutput(BaseModel):

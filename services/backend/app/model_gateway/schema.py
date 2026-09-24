@@ -3,6 +3,9 @@
 Providers accept a subset of JSON Schema. References are inlined and only the
 keywords documented as supported by the Gemini structured-output API are kept
 (unsupported ones such as `pattern` or `maxLength` have unspecified behaviour).
+Array bounds (`minItems`/`maxItems`) are dropped too: combined with enums they make
+Gemini reject the request as too complex (HTTP 400 "invalid argument", observed live
+on gemini-3.7-flash and gemini-3.8-flash).
 The gateway still validates every response against the full Pydantic model, so
 a dropped constraint is enforced there and a violation goes through the repair.
 """
@@ -22,8 +25,6 @@ _KEEP_KEYS = {
     "maximum",
     "items",
     "prefixItems",
-    "minItems",
-    "maxItems",
     "anyOf",
 }
 

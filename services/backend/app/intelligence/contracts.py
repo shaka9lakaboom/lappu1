@@ -3,6 +3,7 @@
 Mirrored in packages/contracts/src/intelligence.ts. Change both together.
 """
 
+import re
 from typing import Literal
 from uuid import UUID
 
@@ -28,6 +29,19 @@ SegmentRoute = Literal["MAP", "METADATA_ONLY", "STOP", "UNCERTAIN"]
 MappingOutcome = Literal["MAPPED", "ABSTAINED"]
 SkillMappingStatus = Literal["ACCEPTED", "ABSTAINED", "REJECTED"]
 SkillCandidateStatus = Literal["PENDING_REVIEW", "APPROVED", "MERGED", "REJECTED"]
+
+
+def normalize_reason_code(value: object) -> object:
+    """Fold a model's free-form reason code to UPPER_SNAKE_CASE (e.g. "concept question").
+
+    Casing is not a semantic error worth a repair call; anything that is not a string
+    is left for strict validation to reject."""
+    if not isinstance(value, str):
+        return value
+    code = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").upper()[:64]
+    if not code:
+        return "UNSPECIFIED"
+    return code if code[0].isalpha() else f"R_{code}"[:64]
 
 
 class SkillCandidate(BaseModel):

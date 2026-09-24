@@ -15,7 +15,9 @@ import json
 import logging
 import math
 import re
+import threading
 import time
+from collections import deque
 from collections.abc import Callable, Sequence
 from typing import Any, Literal
 from uuid import UUID, uuid4
@@ -80,6 +82,8 @@ class ModelGateway:
         embedding_model: str,
         default_timeout: float = 60.0,
         clock: Callable[[], float] = time.perf_counter,
+        generation_limiter: "RequestRateLimiter | None" = None,
+        embedding_limiter: "RequestRateLimiter | None" = None,
     ) -> None:
         self._provider = provider
         self._recorder = recorder
@@ -87,6 +91,8 @@ class ModelGateway:
         self.embedding_model = embedding_model
         self._default_timeout = default_timeout
         self._clock = clock
+        self._generation_limiter = generation_limiter or RequestRateLimiter(0)
+        self._embedding_limiter = embedding_limiter or RequestRateLimiter(0)
 
     @property
     def provider_name(self) -> str:
@@ -172,6 +178,7 @@ class ModelGateway:
                 }
             )
         )
+        self._generation_limiter.acquire()
         started = self._clock()
         try:
             response = self._provider.generate_json(
@@ -256,6 +263,7 @@ class ModelGateway:
                     }
                 )
             )
+            self._embedding_limiter.acquire()
             started = self._clock()
             try:
                 response = self._provider.embed(
@@ -415,6 +423,10 @@ def _status_for(exc: ProviderError) -> ModelRunStatus:
     }.get(exc.kind, ModelRunStatus.FAILED)
 
 
+# Provider backpressure: retry later without spending a job attempt.
+_TRANSIENT_CODES = {"HTTP_429", "HTTP_503"}
+
+
 def _gateway_error(
     exc: ProviderError, task_type: str, runs: tuple[ModelRun, ...]
 ) -> ModelGatewayError:
@@ -423,7 +435,49 @@ def _gateway_error(
         "rate_limited": ModelRateLimitedError,
         "unavailable": ModelUnavailableError,
     }.get(exc.kind, ModelCallError)
-    return cls(f"{task_type}: provider {exc.kind} ({exc.code})", runs)
+    return cls(
+        f"{task_type}: provider {exc.kind} ({exc.code})",
+        runs,
+        transient=exc.kind == "rate_limited" or exc.code in _TRANSIENT_CODES,
+        retry_after=exc.retry_after,
+    )
+
+
+class RequestRateLimiter:
+    """Client-side sliding-window limit (requests per minute) for one model family.
+
+    Keeps a free-tier quota (e.g. 5 RPM) from turning every burst into 429s.
+    Thread-safe; `max_per_minute <= 0` disables it."""
+
+    def __init__(
+        self,
+        max_per_minute: int,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        sleep: Callable[[float], None] = time.sleep,
+    ) -> None:
+        self.max_per_minute = max_per_minute
+        self._clock = clock
+        self._sleep = sleep
+        self._lock = threading.Lock()
+        self._sent: deque[float] = deque()
+
+    def acquire(self) -> float:
+        """Block until a request may be sent; returns the seconds waited."""
+        if self.max_per_minute <= 0:
+            return 0.0
+        waited = 0.0
+        with self._lock:
+            while True:
+                now = self._clock()
+                while self._sent and now - self._sent[0] >= 60.0:
+                    self._sent.popleft()
+                if len(self._sent) < self.max_per_minute:
+                    self._sent.append(now)
+                    return waited
+                delay = 60.0 - (now - self._sent[0]) + 0.05
+                self._sleep(delay)
+                waited += delay
 
 
 def _chunks(texts: Sequence[str]) -> list[tuple[int, int]]:

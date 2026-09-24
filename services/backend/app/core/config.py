@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # low | medium | high (gemini-3.7-flash does not accept "minimal").
     gemini_thinking_level: Literal["low", "medium", "high"] = "low"
     model_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    # Client-side request limits per minute (0 = off). The Gemini free tier allows as
+    # little as 5 generation requests per minute per project.
+    gemini_generation_rpm: int = Field(default=0, ge=0, le=100000)
+    gemini_embedding_rpm: int = Field(default=0, ge=0, le=100000)
 
     # In-process durable worker loop (architecture §7.3). It starts with the API
     # when DATABASE_URL and GEMINI_API_KEY are set and APP_ENV is not "test".

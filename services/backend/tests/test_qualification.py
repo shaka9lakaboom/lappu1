@@ -212,3 +212,23 @@ def test_captured_text_stays_data_not_instructions() -> None:
     assert injection not in call["system"]
     assert f"<<<\n{injection}\n>>>" in call["messages"][-1].content
     assert routes(result) == [("STOP", "NON_LEARNING")]
+
+
+@pytest.mark.parametrize(
+    ("raw", "folded"),
+    [
+        ("concept question", "CONCEPT_QUESTION"),
+        ("programming_question", "PROGRAMMING_QUESTION"),
+        ("Factual-Lookup!", "FACTUAL_LOOKUP"),
+        ("2fa help", "R_2FA_HELP"),
+        ("  ", "UNSPECIFIED"),
+    ],
+)
+def test_reason_codes_are_folded_to_upper_snake(raw, folded) -> None:
+    seg = QualifiedSegment.model_validate(segment(reason_code=raw), strict=True)
+    assert seg.reason_code == folded
+
+
+def test_non_string_reason_code_is_still_invalid() -> None:
+    with pytest.raises(ValueError):
+        QualifiedSegment.model_validate({**segment(), "reason_code": 7}, strict=True)

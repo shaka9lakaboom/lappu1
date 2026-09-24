@@ -6,6 +6,7 @@ The API key is server-only and is never logged.
 """
 
 import logging
+import re
 from collections.abc import Sequence
 from typing import Any, Literal
 
@@ -62,6 +63,7 @@ class GeminiProvider:
             response_mime_type="application/json",
             response_json_schema=json_schema,
             thinking_config=types.ThinkingConfig(thinking_level=self._thinking_level.upper()),
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             http_options=types.HttpOptions(timeout=int(timeout * 1000)),
         )
         response = self._call(
@@ -133,7 +135,9 @@ class GeminiProvider:
         except errors.ClientError as exc:
             code = getattr(exc, "code", None)
             if code == 429:
-                raise ProviderError("rate_limited", "HTTP_429", "rate limited") from exc
+                raise ProviderError(
+                    "rate_limited", "HTTP_429", "rate limited", retry_after=_retry_after(exc)
+                ) from exc
             if code in (401, 403):
                 raise ProviderError("unavailable", f"HTTP_{code}", "credentials rejected") from exc
             if code == 404:
@@ -142,11 +146,31 @@ class GeminiProvider:
         except errors.ServerError as exc:
             code = getattr(exc, "code", None)
             kind = "unavailable" if code == 503 else "failed"
-            raise ProviderError(kind, f"HTTP_{code}", _safe_message(exc)) from exc
+            raise ProviderError(
+                kind, f"HTTP_{code}", _safe_message(exc), retry_after=_retry_after(exc)
+            ) from exc
         except (httpx.TimeoutException, TimeoutError) as exc:
             raise ProviderError("timeout", "TIMEOUT", "provider call timed out") from exc
         except httpx.TransportError as exc:
             raise ProviderError("unavailable", "TRANSPORT", type(exc).__name__) from exc
+
+
+_RETRY_IN = re.compile(r"retry in ([0-9]+(?:[.][0-9]+)?)s", re.IGNORECASE)
+
+
+def _retry_after(exc: Exception) -> float | None:
+    """The server's RetryInfo delay (e.g. "27s"), or a "retry in 27.4s" hint."""
+    details = getattr(exc, "details", None)
+    if isinstance(details, dict):
+        for item in (details.get("error") or {}).get("details") or []:
+            delay = item.get("retryDelay") if isinstance(item, dict) else None
+            if isinstance(delay, str) and delay.endswith("s"):
+                try:
+                    return float(delay[:-1])
+                except ValueError:
+                    pass
+    match = _RETRY_IN.search(str(getattr(exc, "message", "") or ""))
+    return float(match.group(1)) if match else None
 
 
 def _safe_message(exc: Exception) -> str:

@@ -10,9 +10,14 @@ abstention (the unit is retained as UNCERTAIN with no mapping).
 from dataclasses import dataclass
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from app.intelligence.contracts import LearningRelevance, SegmentContext, SegmentIntent
+from app.intelligence.contracts import (
+    LearningRelevance,
+    SegmentContext,
+    SegmentIntent,
+    normalize_reason_code,
+)
 from app.intelligence.policy import QualificationPolicy
 from app.model_gateway import (
     Message,
@@ -39,6 +44,8 @@ class QualifiedSegment(BaseModel):
     skill_bearing: bool
     skill_bearing_confidence: float = Field(ge=0, le=1)
     reason_code: ReasonCode
+
+    _fold_reason_code = field_validator("reason_code", mode="before")(normalize_reason_code)
 
 
 class QualificationOutput(BaseModel):

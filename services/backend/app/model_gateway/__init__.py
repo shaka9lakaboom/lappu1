@@ -3,7 +3,7 @@
 from psycopg_pool import ConnectionPool
 
 from app.core.config import Settings
-from app.model_gateway.gateway import ModelGateway, sha256_hex
+from app.model_gateway.gateway import ModelGateway, RequestRateLimiter, sha256_hex
 from app.model_gateway.recorder import DbModelRunRecorder, InMemoryRunRecorder, ModelRunRecorder
 from app.model_gateway.types import (
     EMBEDDING_DIMENSION,
@@ -39,6 +39,7 @@ __all__ = [
     "ModelTimeoutError",
     "ModelUnavailableError",
     "ProviderError",
+    "RequestRateLimiter",
     "RunContext",
     "StructuredResult",
     "build_gateway",
@@ -62,4 +63,6 @@ def build_gateway(settings: Settings, pool: ConnectionPool) -> ModelGateway | No
         generation_model=settings.gemini_generation_model,
         embedding_model=settings.gemini_embedding_model,
         default_timeout=settings.model_timeout_seconds,
+        generation_limiter=RequestRateLimiter(settings.gemini_generation_rpm),
+        embedding_limiter=RequestRateLimiter(settings.gemini_embedding_rpm),
     )

@@ -33,9 +33,15 @@ from app.jobs.queue import (
     fail_job,
     recover_stale_jobs,
 )
-from app.model_gateway import ModelGateway
+from app.model_gateway import ModelGateway, ModelGatewayError
 
 logger = logging.getLogger("skillmirror.worker")
+
+# Provider backpressure (429 / 503): re-queue after the server's retry hint (clamped)
+# or a default delay, without spending an attempt. The job stays pending, never FAILED.
+BACKPRESSURE_MIN_DELAY = 15
+BACKPRESSURE_DEFAULT_DELAY = 60
+BACKPRESSURE_MAX_DELAY = 600
 
 Handler = Callable[[ClaimedJob], JobResult]
 FailureHook = Callable[[ClaimedJob, str, bool], None]
@@ -45,6 +51,7 @@ FailureHook = Callable[[ClaimedJob, str, bool], None]
 class WorkerStats:
     completed: int = 0
     deferred: int = 0
+    backpressure: int = 0
     failed: int = 0
     recovered: int = 0
 
@@ -114,26 +121,14 @@ class Worker:
     def _execute(self, job: ClaimedJob) -> None:
         try:
             result = self._handlers[job.job_type](job)
+        except ModelGatewayError as exc:
+            if exc.transient:
+                self._backpressure(job, exc)
+            else:
+                self._fail(job, exc)
+            return
         except Exception as exc:
-            error = f"{type(exc).__name__}: {exc}"
-            with self._pool.connection() as conn:
-                state = fail_job(conn, job.id, error)
-            self.stats.failed += 1
-            logger.warning(
-                "job %s %s attempt %d/%d failed -> %s: %s",
-                job.id,
-                job.job_type,
-                job.attempts,
-                job.max_attempts,
-                state,
-                error,
-            )
-            hook = self._failure_hooks.get(job.job_type)
-            if hook:
-                try:
-                    hook(job, error, state == "FAILED")
-                except Exception:
-                    logger.exception("failure hook for job %s raised", job.id)
+            self._fail(job, exc)
             return
 
         with self._pool.connection() as conn:
@@ -144,6 +139,41 @@ class Worker:
                 complete_job(conn, job.id, result.outcome)
                 self.stats.completed += 1
         logger.info("job %s %s -> %s", job.id, job.job_type, result.outcome)
+
+    def _backpressure(self, job: ClaimedJob, exc: ModelGatewayError) -> None:
+        hint = exc.retry_after or BACKPRESSURE_DEFAULT_DELAY
+        delay = int(min(max(hint, BACKPRESSURE_MIN_DELAY), BACKPRESSURE_MAX_DELAY))
+        with self._pool.connection() as conn:
+            defer_job(conn, job.id, timedelta(seconds=delay), "MODEL_BACKPRESSURE")
+        self.stats.backpressure += 1
+        logger.warning(
+            "job %s %s: model backpressure (%s); retrying in %ds without spending an attempt",
+            job.id,
+            job.job_type,
+            exc,
+            delay,
+        )
+
+    def _fail(self, job: ClaimedJob, exc: Exception) -> None:
+        error = f"{type(exc).__name__}: {exc}"
+        with self._pool.connection() as conn:
+            state = fail_job(conn, job.id, error)
+        self.stats.failed += 1
+        logger.warning(
+            "job %s %s attempt %d/%d failed -> %s: %s",
+            job.id,
+            job.job_type,
+            job.attempts,
+            job.max_attempts,
+            state,
+            error,
+        )
+        hook = self._failure_hooks.get(job.job_type)
+        if hook:
+            try:
+                hook(job, error, state == "FAILED")
+            except Exception:
+                logger.exception("failure hook for job %s raised", job.id)
 
     def _notify_failed(self, job_id, error: str) -> None:
         with self._pool.connection() as conn:

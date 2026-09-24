@@ -192,7 +192,9 @@ def test_provider_schema_keeps_only_documented_keywords() -> None:
     text = json.dumps(provider_json_schema(GraphProposal))
     for keyword in ("pattern", "minLength", "maxLength", "title", "default", "uniqueItems"):
         assert f'"{keyword}"' not in text
-    assert '"maxItems"' in text and '"enum"' in text and '"minimum"' in text
+    # Array bounds + enums trip Gemini's schema-complexity check (HTTP 400); Pydantic enforces them.
+    assert '"maxItems"' not in text and '"minItems"' not in text
+    assert '"enum"' in text and '"minimum"' in text
 
 
 # --- Embeddings -----------------------------------------------------------------
@@ -357,3 +359,61 @@ def test_gateway_requires_server_side_key_and_never_exposes_it() -> None:
     settings = make_settings(gemini_api_key="AIza-test-secret-value")
     assert "AIza-test-secret-value" not in repr(settings)
     assert "AIza-test-secret-value" not in str(settings.model_dump())
+
+
+# --- Backpressure -------------------------------------------------------------
+
+
+def test_rate_limit_and_overload_are_transient_with_retry_hint() -> None:
+    gateway, _ = make_gateway(scripted(ProviderError("rate_limited", "HTTP_429", retry_after=27.0)))
+    with pytest.raises(ModelRateLimitedError) as exc_info:
+        call(gateway)
+    assert exc_info.value.transient and exc_info.value.retry_after == 27.0
+
+    gateway, _ = make_gateway(scripted(ProviderError("unavailable", "HTTP_503")))
+    with pytest.raises(ModelUnavailableError) as exc_info:
+        call(gateway)
+    assert exc_info.value.transient
+
+    gateway, _ = make_gateway(scripted(ProviderError("unavailable", "HTTP_403")))
+    with pytest.raises(ModelUnavailableError) as exc_info:
+        call(gateway)
+    assert not exc_info.value.transient  # bad credentials are not backpressure
+
+
+def test_gemini_429_retry_delay_is_parsed() -> None:
+    error = genai_errors.ClientError(
+        429,
+        {
+            "error": {
+                "code": 429,
+                "message": "Quota exceeded. Please retry in 27.4s.",
+                "details": [
+                    {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "27s"}
+                ],
+            }
+        },
+    )
+    with pytest.raises(ProviderError) as exc_info:
+        gemini(FakeModels(error=error)).generate_json(
+            model="m", system=None, messages=[Message("user", "u")], json_schema={}, timeout=1
+        )
+    assert exc_info.value.kind == "rate_limited" and exc_info.value.retry_after == 27.0
+
+
+def test_request_rate_limiter_spaces_calls_within_a_minute() -> None:
+    from app.model_gateway import RequestRateLimiter
+
+    now = [0.0]
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        now[0] += seconds
+
+    limiter = RequestRateLimiter(2, clock=lambda: now[0], sleep=sleep)
+    assert limiter.acquire() == 0 and limiter.acquire() == 0
+    now[0] = 10.0
+    waited = limiter.acquire()  # third call in the same minute waits for the window
+    assert waited == pytest.approx(50.05) and now[0] >= 60.0
+    assert RequestRateLimiter(0).acquire() == 0.0

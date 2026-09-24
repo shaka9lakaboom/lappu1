@@ -152,3 +152,36 @@ def test_fresh_processing_jobs_are_not_stolen(db_pool, new_learner) -> None:
     worker = Worker(db_pool, {TEST_JOB: lambda job: JobResult("stolen")})
     assert worker.run_once() == 0 and worker.stats.recovered == 0
     assert job_state(db_pool, job_id)[0] == "PROCESSING"
+
+
+def test_model_backpressure_defers_without_spending_attempts(db_pool, new_learner) -> None:
+    from app.model_gateway import ModelRateLimitedError
+
+    (job_id,) = enqueue(db_pool, new_learner())
+
+    def rate_limited(job):
+        raise ModelRateLimitedError("quota", transient=True, retry_after=27.0)
+
+    worker = Worker(db_pool, {TEST_JOB: rate_limited})
+    worker.run_once()
+    state, attempts, outcome, _, _ = job_state(db_pool, job_id)
+    assert (state, attempts, outcome) == ("PENDING", 0, "MODEL_BACKPRESSURE")
+    assert worker.stats.backpressure == 1 and worker.stats.failed == 0
+    with db_pool.connection() as conn:
+        (delay,) = conn.execute(
+            "select extract(epoch from available_at - now()) from public.processing_jobs where id = %s",
+            (job_id,),
+        ).fetchone()
+    assert 20 < float(delay) <= 27.5
+
+
+def test_non_transient_model_errors_still_count_as_attempts(db_pool, new_learner) -> None:
+    from app.model_gateway import ModelUnavailableError
+
+    (job_id,) = enqueue(db_pool, new_learner())
+
+    def bad_credentials(job):
+        raise ModelUnavailableError("credentials rejected", transient=False)
+
+    Worker(db_pool, {TEST_JOB: bad_credentials}).run_once()
+    assert job_state(db_pool, job_id)[:2] == ("RETRY_WAIT", 1)
