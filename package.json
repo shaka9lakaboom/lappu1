@@ -1,0 +1,28 @@
+{
+  "name": "skillmirror-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SkillMirror Monorepo - Foundation (P0)",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm --prefix apps/web run dev",
+    "dev:backend": "powershell -Command \"if (Test-Path services/backend/venv/Scripts/Activate.ps1) { . services/backend/venv/Scripts/Activate.ps1; uvicorn app.main:app --reload } else { python -m uvicorn app.main:app --reload }\"",
+    "build:web": "npm --prefix apps/web run build",
+    "build:extension": "npm --prefix apps/extension run build",
+    "build": "npm run build:web && npm run build:extension",
+    "lint:web": "npm --prefix apps/web run lint",
+    "typecheck:web": "npm --prefix apps/web run typecheck",
+    "typecheck:extension": "npm --prefix apps/extension run typecheck",
+    "typecheck": "npm run typecheck:web && npm run typecheck:extension",
+    "test:backend": "powershell -Command \"if (Test-Path services/backend/venv/Scripts/Activate.ps1) { . services/backend/venv/Scripts/Activate.ps1; pytest services/backend } else { python -m pytest services/backend }\"",
+    "test:web": "npm --prefix apps/web run test",
+    "test": "npm run test:backend && npm run test:web"
+  },
+  "devDependencies": {
+    "isomorphic-git": "^1.42.2",
+    "typescript": "^5.4.5"
+  }
+}

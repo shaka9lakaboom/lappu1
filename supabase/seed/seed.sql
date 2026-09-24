@@ -1,0 +1,2 @@
+-- Supabase Seed Data (P0 Baseline)
+-- Used for populating initial local dev data if needed.
