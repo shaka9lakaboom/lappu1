@@ -52,8 +52,8 @@ export default async function ActivityPage() {
         <CardHeader>
           <CardTitle>Captured messages</CardTitle>
           <CardDescription>
-            <span data-testid="activity-count">{count ?? rows.length}</span> stored. Messages are only recorded here;
-            skills are not analysed yet.
+            <span data-testid="activity-count">{count ?? rows.length}</span> stored. Each turn is then analysed in the
+            background: non-learning activity is ignored and learning activity is matched to course skills.
           </CardDescription>
         </CardHeader>
         <CardContent>

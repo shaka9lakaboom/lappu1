@@ -120,6 +120,18 @@ export default async function DashboardPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle>Courses</CardTitle>
+          <CardDescription>Your courses and the skill graph SkillMirror generated for each.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm">
+          <Link href="/courses" className="underline underline-offset-4" data-testid="courses-link">
+            Open Courses
+          </Link>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle>Captured activity</CardTitle>
           <CardDescription>
             Messages the SkillMirror Companion captured from ChatGPT, with their sync and processing status.
@@ -133,8 +145,7 @@ export default async function DashboardPage() {
       </Card>
 
       <p className="text-sm text-muted-foreground">
-        Courses, skills and evidence will appear here once processing exists. Nothing is shown until there is
-        real evidence.
+        Mastery and evidence will appear here once they exist. Nothing is shown until there is real evidence.
       </p>
     </main>
   );

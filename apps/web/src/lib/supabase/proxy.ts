@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { readSupabasePublicEnv } from './env';
 
-const PROTECTED_PREFIXES = ['/dashboard', '/activity'];
+const PROTECTED_PREFIXES = ['/dashboard', '/activity', '/courses'];
 const AUTH_PAGES = ['/sign-in', '/sign-up'];
 
 /**
