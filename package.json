@@ -24,6 +24,7 @@
     "test:backend": "cd services/backend && python -m pytest",
     "test:web": "npm run test --workspace @skillmirror/web",
     "test:extension": "npm run test --workspace @skillmirror/extension",
+    "test:extension:unit": "npm run test:unit --workspace @skillmirror/extension",
     "e2e:auth": "npm run e2e:auth --workspace @skillmirror/web"
   }
 }

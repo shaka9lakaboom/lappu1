@@ -34,8 +34,11 @@ test.beforeAll(() => {
   if (!manifest) throw new Error('dist/manifest.json missing: run `npm run build` in apps/extension first');
 });
 
-test('service worker starts from the unpacked build', async ({ context, extensionId }) => {
-  expect(extensionId).toMatch(/^[a-p]{32}$/);
+// Derived from manifest.key; this is the origin to allow in the backend's CORS_ORIGINS.
+const DEV_EXTENSION_ID = 'cohpimnabjigooghbigblennedbplojm';
+
+test('service worker starts from the unpacked build with the stable dev id', async ({ context, extensionId }) => {
+  expect(extensionId).toBe(DEV_EXTENSION_ID);
   const worker = context.serviceWorkers().find((w) => w.url().includes(extensionId));
   expect(worker?.url()).toBe(`chrome-extension://${extensionId}/background/service-worker.js`);
 });
@@ -51,6 +54,10 @@ test('popup renders and reaches the service worker', async ({ context, extension
   await expect(page.getByRole('heading', { name: 'SkillMirror Companion' })).toBeVisible();
   await expect(page.getByTestId('version')).toHaveText(manifest!.version);
   await expect(page.getByTestId('worker-status')).toHaveText('Running');
-  await expect(page.getByTestId('tracking-status')).toHaveText('Not available yet');
+  // CI builds without configuration; a local build may be configured but signed out.
+  await expect(page.getByTestId('tracking-status')).toHaveText(/^(Not configured|Off \(signed out\))$/);
+  // The popup opened as a tab is not a ChatGPT page.
+  await expect(page.getByTestId('provider-status')).toHaveText('Unsupported page');
+  await expect(page.getByTestId('unsupported-note')).toBeVisible();
   expect(errors).toEqual([]);
 });

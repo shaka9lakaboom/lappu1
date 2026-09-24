@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "SkillMirror Companion",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Use AI. Keep the skill. Companion extension for SkillMirror.",
   "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtsgpQWQyCusBNB9yJWiZyjm444W5IAT+vr/tR2aLNkICLv5z4EZfJ+cY5WSEnv/2T43fWxM2lWRiDr8jvHbUsYcwDuN1uUuKDuiShhXJhGbYNSa3NeZv8AS8HtFHFKcuKOLFUZAeyVvHyvUddoJ0CtEc4QmZHrGScB/JdgKcS1EQtkI0D7udidHVVyrn5I7LhumJ/kaVMV5HXpKt5pLuQO2wWHbNy50NMN7QiD2PXoilesdl4v9ZWX8eR+tMHCcVTtCP+dfyVVKACk2Uy4RL8z4qphhMQgaX6hER8qDZhgt6XWfJNZGDlVOaTkzwFo/6pkWBwKPCsi6Bu/opU0G7IwIDAQAB",
   "action": {
     "default_title": "SkillMirror",
     "default_popup": "popup/popup.html"
@@ -12,6 +13,20 @@
     "service_worker": "background/service-worker.js",
     "type": "module"
   },
-  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content/chatgpt.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
   "host_permissions": []
 }

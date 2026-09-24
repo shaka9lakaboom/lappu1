@@ -455,3 +455,45 @@ def test_sql_injection_text_is_stored_verbatim(db_pool, db_api, new_learner, mak
             "select content_text from public.raw_messages where learner_id = %s", (learner,)
         ).fetchone()
     assert stored == text
+
+
+@pytestmark_db
+def test_extension_captured_envelopes_end_to_end(db_pool, db_api, new_learner, make_token) -> None:
+    """Envelopes produced by the extension's real capture pipeline from the real
+    ChatGPT DOM fixture (packages/contracts/fixtures/captured-envelopes.json)
+    -> API -> raw rows -> processing jobs; a resend creates nothing."""
+    import json
+    from pathlib import Path
+
+    golden = (
+        Path(__file__).resolve().parents[3] / "packages/contracts/fixtures/captured-envelopes.json"
+    )
+    learner = new_learner()
+    events = [{**e, "learner_id": str(learner)} for e in json.loads(golden.read_text("utf-8"))]
+    headers = auth(make_token(learner))
+
+    first = db_api.post(URL, json=make_batch(*events), headers=headers)
+    assert first.status_code == 200, first.text
+    assert first.json()["accepted"] == 4
+
+    with db_pool.connection() as conn:
+        rows = conn.execute(
+            """
+            select m.role::text, m.external_message_id, m.external_parent_message_id,
+                   m.message_index, c.external_id, j.state::text
+              from public.raw_messages m
+              join public.conversations c on c.id = m.conversation_id
+              join public.processing_jobs j on j.entity_id = m.id
+             where m.learner_id = %s order by m.message_index
+            """,
+            (learner,),
+        ).fetchall()
+    assert [r[0] for r in rows] == ["user", "assistant", "user", "assistant"]
+    assert [r[2] for r in rows[1:]] == [r[1] for r in rows[:-1]]  # parent chain preserved
+    assert {r[4] for r in rows} == {"6ab58b53-14f8-83ea-853a-57c0ab951696"}
+    assert {r[5] for r in rows} == {"PENDING"}
+
+    resend = db_api.post(URL, json=make_batch(*events), headers=headers).json()
+    assert (resend["accepted"], resend["duplicates"]) == (0, 4)
+    assert count_rows(db_pool, "raw_messages", learner) == 4
+    assert count_rows(db_pool, "processing_jobs", learner) == 4
