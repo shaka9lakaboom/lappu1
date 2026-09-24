@@ -208,3 +208,37 @@ create policy processing_jobs_select_own on public.processing_jobs
     for select to authenticated using ((select auth.uid()) = learner_id);
 
 revoke execute on function public.reject_raw_message_update() from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------------
+-- activity_feed: the learner's raw activity + processing status (Activity page)
+-- ---------------------------------------------------------------------------
+-- security_invoker: the caller's RLS on the base tables applies, so a learner
+-- sees only their own rows. Exposes a short preview, not the full content.
+create view public.activity_feed
+with (security_invoker = true)
+as
+select
+    m.id,
+    m.learner_id,
+    m.conversation_id,
+    c.external_id                  as external_conversation_id,
+    m.source_provider,
+    m.role,
+    m.message_index,
+    m.revision_index,
+    m.captured_at,
+    m.received_at,
+    m.context_incomplete,
+    left(m.content_text, 280)      as preview,
+    char_length(m.content_text)    as content_chars,
+    j.state                        as processing_state,
+    j.attempts                     as processing_attempts
+from public.raw_messages m
+join public.conversations c on c.id = m.conversation_id
+left join public.processing_jobs j
+       on j.entity_id = m.id and j.job_type = 'PROCESS_RAW_MESSAGE';
+
+comment on view public.activity_feed is 'Raw capture status per learner (P1 Activity page). RLS via security_invoker.';
+
+revoke all on public.activity_feed from anon, authenticated;
+grant select on public.activity_feed to authenticated;

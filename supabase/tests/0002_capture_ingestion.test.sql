@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(30);
+select plan(33);
 
 -- Fixture identities: learners A and B (profiles come from the signup trigger).
 insert into auth.users (id, email)
@@ -200,6 +200,16 @@ select is((select count(*) from public.raw_messages), 3::bigint, 'learner A sees
 select is((select count(*) from public.conversations), 2::bigint, 'learner A sees only their own conversations');
 select is((select count(*) from public.attachments), 1::bigint, 'learner A sees only their own attachments');
 select is((select count(*) from public.processing_jobs), 1::bigint, 'learner A sees only their own jobs');
+select is(
+    (select count(*) from public.activity_feed),
+    3::bigint,
+    'activity_feed shows only the caller''s messages (security_invoker RLS)'
+);
+select is(
+    (select processing_state from public.activity_feed where id = '20000000-0000-4000-8000-0000000000a1'),
+    'PENDING'::public.job_state,
+    'activity_feed reports the processing state of a message'
+);
 select throws_ok(
     $$ insert into public.raw_messages (learner_id, conversation_id, source_provider, source_method,
          role, content_text, content_format, content_hash, fingerprint, revision_index, captured_at,
@@ -228,6 +238,11 @@ select throws_ok(
     $$ select count(*) from public.raw_messages $$,
     '42501', null,
     'anon cannot read raw messages'
+);
+select throws_ok(
+    $$ select count(*) from public.activity_feed $$,
+    '42501', null,
+    'anon cannot read the activity feed'
 );
 
 reset role;
