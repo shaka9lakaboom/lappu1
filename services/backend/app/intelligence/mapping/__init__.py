@@ -1,3 +1,1 @@
-"""
-Mapping engine placeholder (P0 baseline)
-"""
+"""Engine 07b - Mapping and confidence gate over retrieved candidates. (P3)"""

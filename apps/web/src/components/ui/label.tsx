@@ -1,17 +1,7 @@
-import * as React from 'react';
-import { cn } from '@skillmirror/ui';
+import type { ComponentProps } from 'react';
 
-export interface LabelProps extends React.LabelHTMLAttributes<HTMLLabelElement> {}
+import { cn } from '@/lib/utils';
 
-const Label = React.forwardRef<HTMLLabelElement, LabelProps>(
-  ({ className, ...props }, ref) => (
-    <label
-      ref={ref}
-      className={cn('text-sm font-medium text-slate-300 leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70', className)}
-      {...props}
-    />
-  )
-);
-Label.displayName = 'Label';
-
-export { Label };
+export function Label({ className, ...props }: ComponentProps<'label'>) {
+  return <label className={cn('text-sm font-medium leading-none', className)} {...props} />;
+}

@@ -1,3 +1,1 @@
-"""
-Verification engine placeholder (P0 baseline)
-"""
+"""Engines 13-15 - Verification Planning, Assessment Generation and Evaluation. (P6)"""

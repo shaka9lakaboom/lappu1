@@ -1,3 +1,1 @@
-"""
-Assistance Debt engine placeholder (P0 baseline)
-"""
+"""Engine 12 - AI Assistance Debt. (P4)"""

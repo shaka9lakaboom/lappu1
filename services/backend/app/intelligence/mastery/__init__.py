@@ -1,3 +1,1 @@
-"""
-Mastery engine placeholder (P0 baseline)
-"""
+"""Engine 11 - Mastery Estimation from independent evidence. (P4)"""

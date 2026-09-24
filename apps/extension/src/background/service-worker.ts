@@ -1,17 +1,23 @@
 /**
- * SkillMirror Chrome Extension Background Service Worker (P0 Foundation)
+ * SkillMirror Companion service worker.
+ *
+ * P0 only answers status requests. P1 adds authentication/session state,
+ * the LocalQueue flush loop and API communication here.
  */
+import { isExtensionRequest, type StatusResponse } from '../shared/messages';
 
-console.log('[SkillMirror Background Worker] Initialized');
+const workerStartedAt = new Date().toISOString();
 
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('[SkillMirror Background Worker] Extension installed/updated');
-});
+chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
+  // Only accept messages from this extension's own pages.
+  if (sender.id !== chrome.runtime.id || !isExtensionRequest(message)) return false;
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[SkillMirror Background Worker] Message received:', message);
-  if (message.type === 'PING') {
-    sendResponse({ status: 'PONG', timestamp: new Date().toISOString() });
-  }
-  return true;
+  const response: StatusResponse = {
+    type: 'STATUS',
+    version: chrome.runtime.getManifest().version,
+    workerStartedAt,
+    capture: 'not_available',
+  };
+  sendResponse(response);
+  return false;
 });

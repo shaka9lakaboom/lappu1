@@ -1,3 +1,1 @@
-"""
-Courses module placeholder (P0 baseline)
-"""
+"""Course setup and course-scoped skill overlays. (P2)"""

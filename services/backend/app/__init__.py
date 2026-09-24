@@ -1,4 +1,3 @@
-"""
-SkillMirror Backend Application Package
-"""
+"""SkillMirror backend service."""
+
 __version__ = "0.1.0"

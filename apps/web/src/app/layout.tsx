@@ -1,21 +1,17 @@
 import type { Metadata } from 'next';
+import { PRODUCT_NAME } from '@skillmirror/config';
+
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'SkillMirror - AI-Assisted Skill Graph & Mastery Platform',
-  description: 'Mastery-based learning engine for capturing AI interactions, attributing skills, and measuring genuine mastery.',
+  title: PRODUCT_NAME,
+  description: 'Use AI. Keep the skill.',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="en" className="dark">
-      <body className="bg-slate-950 text-slate-100 antialiased min-h-screen">
-        {children}
-      </body>
+    <html lang="en">
+      <body className="min-h-screen">{children}</body>
     </html>
   );
 }
