@@ -183,6 +183,16 @@ def test_provider_schema_is_inlined_and_simplified() -> None:
     text = json.dumps(schema)
     assert "$ref" not in text and "$defs" not in text and "additionalProperties" not in text
     assert schema["properties"]["items"]["items"]["properties"]["score"]["maximum"] == 1
+    assert schema["required"] == ["items", "note"]
+
+
+def test_provider_schema_keeps_only_documented_keywords() -> None:
+    from app.intelligence.skill_graph.schemas import GraphProposal
+
+    text = json.dumps(provider_json_schema(GraphProposal))
+    for keyword in ("pattern", "minLength", "maxLength", "title", "default", "uniqueItems"):
+        assert f'"{keyword}"' not in text
+    assert '"maxItems"' in text and '"enum"' in text and '"minimum"' in text
 
 
 # --- Embeddings -----------------------------------------------------------------
