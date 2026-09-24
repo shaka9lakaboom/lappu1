@@ -1,8 +1,11 @@
 /**
- * SkillMirror Shared Configuration Constants
+ * Shared SkillMirror configuration constants.
+ *
+ * Tunable policy values (thresholds, weights) belong in the `policy_config`
+ * table once it exists; only structural constants live here.
  */
 
-export const APP_NAME = 'SkillMirror';
-export const API_VERSION = 'v1';
-export const DEFAULT_DEV_API_PORT = 8000;
-export const DEFAULT_DEV_WEB_PORT = 3000;
+export const PRODUCT_NAME = 'SkillMirror';
+
+/** All versioned backend endpoints are mounted under this prefix (architecture §13). */
+export const API_V1_PREFIX = '/v1';

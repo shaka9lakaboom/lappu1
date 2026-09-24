@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skillmirror.dev/schemas/health-response.schema.json",
+  "title": "HealthResponse",
+  "description": "Response body of GET /health on the SkillMirror backend.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "service", "environment", "version", "timestamp"],
+  "properties": {
+    "status": { "type": "string", "enum": ["ok"] },
+    "service": { "type": "string", "minLength": 1 },
+    "environment": {
+      "type": "string",
+      "enum": ["development", "test", "staging", "production"]
+    },
+    "version": { "type": "string", "minLength": 1 },
+    "timestamp": { "type": "string", "format": "date-time" }
+  }
+}
