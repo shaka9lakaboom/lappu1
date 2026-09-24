@@ -9,7 +9,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import health, v1
+from app.core.body_limit import BodySizeLimitMiddleware
 from app.core.config import Settings, get_settings
+from app.ingestion.models import MAX_BODY_BYTES
 from app.observability.logging import configure_logging
 
 
@@ -19,6 +21,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="SkillMirror API", version=settings.api_version)
     app.dependency_overrides[get_settings] = lambda: settings
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=MAX_BODY_BYTES)
 
     if settings.cors_origins:
         app.add_middleware(
