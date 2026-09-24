@@ -1,0 +1,12 @@
+{"case_id": "rel-birthday", "expected": {"routes": ["STOP", "METADATA_ONLY"], "max_segments": 1, "evidence_expected": false}}
+{"case_id": "rel-scheduling", "expected": {"routes": ["STOP", "METADATA_ONLY"], "max_segments": 1, "evidence_expected": false}}
+{"case_id": "rel-lookup", "expected": {"routes": ["STOP", "METADATA_ONLY"], "max_segments": 1, "evidence_expected": false}}
+{"case_id": "rel-learning-loop", "expected": {"routes": ["MAP"], "must_include_routes": ["MAP"], "max_segments": 1, "mapped_skill_any": ["loop", "enumerate", "iterat"], "evidence_expected": false}}
+{"case_id": "seg-mixed", "expected": {"routes": ["MAP", "STOP", "METADATA_ONLY"], "must_include_routes": ["MAP"], "min_segments": 2, "mapped_skill_any": ["comprehension", "condition", "modulo", "filter", "list"], "evidence_expected": false}}
+{"case_id": "seg-multitask", "expected": {"routes": ["MAP"], "must_include_routes": ["MAP"], "min_segments": 2, "mapped_skill_any": ["while", "loop", "dictionar"], "evidence_expected": false}}
+{"case_id": "map-exceptions", "expected": {"routes": ["MAP"], "must_include_routes": ["MAP"], "max_segments": 1, "mapped_skill_any": ["exception", "error", "try"], "evidence_expected": false}}
+{"case_id": "map-return-none", "expected": {"routes": ["MAP"], "must_include_routes": ["MAP"], "max_segments": 1, "mapped_skill_any": ["return", "function"], "evidence_expected": false}}
+{"case_id": "map-unknown-library", "expected": {"routes": ["MAP", "UNCERTAIN", "METADATA_ONLY"], "abstain_allowed": true, "max_segments": 1, "evidence_expected": false}}
+{"case_id": "abst-attachment", "expected": {"routes": ["UNCERTAIN", "METADATA_ONLY", "STOP"], "max_segments": 1, "evidence_expected": false}}
+{"case_id": "abst-vague", "expected": {"routes": ["STOP", "METADATA_ONLY", "UNCERTAIN"], "max_segments": 1, "evidence_expected": false}}
+{"case_id": "adv-injection", "expected": {"routes": ["STOP", "METADATA_ONLY", "UNCERTAIN"], "max_segments": 1, "evidence_expected": false}}
