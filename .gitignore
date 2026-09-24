@@ -19,6 +19,8 @@ apps/web/next-env.d.ts
 
 # Extension build output
 apps/extension/dist/
+apps/extension/dist-e2e/
+apps/extension/.vitest/
 
 # Playwright
 test-results/

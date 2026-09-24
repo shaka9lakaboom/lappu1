@@ -12,5 +12,5 @@
     "skipLibCheck": true,
     "types": ["chrome", "node"]
   },
-  "include": ["src", "tests", "playwright.config.ts"]
+  "include": ["src", "tests", "playwright.config.ts", "playwright.live.config.ts"]
 }

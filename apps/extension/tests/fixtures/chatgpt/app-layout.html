@@ -1,0 +1,44 @@
+<!doctype html>
+<!-- SYNTHETIC fixture (not captured): the signed-in ChatGPT app layout as publicly documented
+     (article turns containing [data-message-author-role][data-message-id], .whitespace-pre-wrap
+     user text, .markdown assistant text, data-message-model-slug). Used to keep that layout
+     supported; replace with a real capture when one is recorded. Includes a file attachment
+     tile and an image on the second user message. -->
+<html><head><meta charset="utf-8"><title>ChatGPT</title></head><body><main>
+<div role="presentation">
+  <article data-testid="conversation-turn-1">
+    <h5 class="sr-only">You said:</h5>
+    <div data-message-author-role="user" data-message-id="aaa11111-0000-4000-8000-000000000001">
+      <div class="whitespace-pre-wrap">What does this function return?
+
+def f(x):
+    return x * 2</div>
+    </div>
+  </article>
+  <article data-testid="conversation-turn-2">
+    <h6 class="sr-only">ChatGPT said:</h6>
+    <div data-message-author-role="assistant" data-message-id="bbb22222-0000-4000-8000-000000000002" data-message-model-slug="gpt-5">
+      <div class="markdown prose">
+        <p>It returns <code>x</code> doubled.</p>
+        <ul><li>f(2) is 4</li><li>f(5) is 10</li></ul>
+      </div>
+    </div>
+    <div><button aria-label="Copy">Copy</button></div>
+  </article>
+  <article data-testid="conversation-turn-3">
+    <div data-message-author-role="user" data-message-id="ccc33333-0000-4000-8000-000000000003">
+      <div class="flex">
+        <div data-testid="file-attachment" data-file-name="homework-7.pdf"><span>homework-7.pdf</span><span>PDF</span></div>
+        <img src="blob:https://chatgpt.com/x" alt="whiteboard photo" width="320" height="200">
+      </div>
+      <div class="whitespace-pre-wrap">Solve question 7 from the sheet.</div>
+    </div>
+  </article>
+  <article data-testid="conversation-turn-4">
+    <div data-message-author-role="assistant" data-message-id="ddd44444-0000-4000-8000-000000000004" data-message-model-slug="gpt-5">
+      <div class="markdown prose result-streaming"><p>Question 7 asks</p></div>
+    </div>
+  </article>
+</div>
+<button data-testid="stop-button" aria-label="Stop streaming">Stop</button>
+</main></body></html>

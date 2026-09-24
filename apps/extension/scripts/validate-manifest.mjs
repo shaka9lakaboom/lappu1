@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const dist = join(root, 'dist');
+const dist = join(root, process.env.SKILLMIRROR_OUT_DIR || 'dist');
 const errors = [];
 const check = (condition, message) => condition || errors.push(message);
 
@@ -43,12 +43,43 @@ if (popup) {
   }
 }
 
-// P0 needs no privileges. Every permission added later must be justified here.
-const ALLOWED_PERMISSIONS = new Set([]);
+// Every permission must be justified here (architecture section 15.2: minimal permissions).
+//   storage - pause flag + "may capture" flag shared with the content script
+//   alarms  - periodic LocalQueue flush after the service worker was suspended
+const ALLOWED_PERMISSIONS = new Set(['storage', 'alarms']);
 for (const permission of manifest.permissions ?? []) {
   check(ALLOWED_PERMISSIONS.has(permission), `unexpected permission "${permission}"`);
 }
-check((manifest.host_permissions ?? []).length === 0, 'P0 requests no host permissions');
+// The API and Supabase are reached through CORS, so no host permissions are needed.
+check((manifest.host_permissions ?? []).length === 0, 'no host_permissions expected');
+check(!('externally_connectable' in manifest), 'externally_connectable is not used');
+check(!('web_accessible_resources' in manifest), 'no web_accessible_resources expected');
+
+// Content scripts: ChatGPT only (P1), bundled locally.
+const SUPPORTED_MATCHES = new Set(['https://chatgpt.com/*']);
+const scripts = manifest.content_scripts ?? [];
+check(scripts.length === 1, 'exactly one content script (ChatGPT) expected');
+for (const script of scripts) {
+  for (const match of script.matches ?? []) check(SUPPORTED_MATCHES.has(match), `unsupported content script match "${match}"`);
+  for (const js of script.js ?? []) {
+    check(!/^(https?:)?\/\//.test(js), `remote content script not allowed: ${js}`);
+    check(existsSync(join(dist, js)), `content script ${js} missing`);
+  }
+}
+check(typeof manifest.key === 'string' && manifest.key.length > 200, 'manifest.key (public key for a stable dev extension id) is required');
+
+// No bundled file may contain a Supabase secret or service-role key.
+for (const file of [worker, 'content/chatgpt.js', 'popup/popup.js']) {
+  const path = file && join(dist, file);
+  if (!path || !existsSync(path)) continue;
+  const code = readFileSync(path, 'utf8');
+  check(!/sb_secret_[A-Za-z0-9_-]{10,}/.test(code), `${file} contains a Supabase secret key`);
+  for (const [token] of code.matchAll(/eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g)) {
+    const role = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')).role;
+    check(role !== 'service_role', `${file} contains a service-role key`);
+  }
+  check(!/(^|[^A-Za-z0-9_$.])eval[(]|new Function[(]/.test(code), `${file} uses eval/new Function`);
+}
 
 if (errors.length > 0) {
   console.error(`Manifest validation failed:\n  - ${errors.join('\n  - ')}`);

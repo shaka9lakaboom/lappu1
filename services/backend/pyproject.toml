@@ -13,6 +13,8 @@ dependencies = [
     "pydantic>=2.13,<3",
     "pydantic-settings>=2.15,<3",
     "pyjwt[crypto]>=2.15,<3",
+    "psycopg[binary]>=3.3,<3.4",
+    "psycopg-pool>=3.3,<3.4",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,9 @@ include = ["app*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra --strict-markers"
+markers = [
+    "db: needs a PostgreSQL database with the Supabase schema (TEST_DATABASE_URL)",
+]
 
 [tool.ruff]
 line-length = 100

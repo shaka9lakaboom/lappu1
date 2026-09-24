@@ -1,4 +1,5 @@
 import type { HealthResponse, Profile } from '@skillmirror/contracts';
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
 import { signOut } from '@/app/auth/actions';
@@ -117,9 +118,23 @@ export default async function DashboardPage() {
         </CardContent>
       </Card>
 
+      <Card>
+        <CardHeader>
+          <CardTitle>Captured activity</CardTitle>
+          <CardDescription>
+            Messages the SkillMirror Companion captured from ChatGPT, with their sync and processing status.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="text-sm">
+          <Link href="/activity" className="underline underline-offset-4" data-testid="activity-link">
+            Open Activity
+          </Link>
+        </CardContent>
+      </Card>
+
       <p className="text-sm text-muted-foreground">
-        Courses, skills and evidence will appear here once capture and processing exist. Nothing is shown
-        until there is real evidence.
+        Courses, skills and evidence will appear here once processing exists. Nothing is shown until there is
+        real evidence.
       </p>
     </main>
   );

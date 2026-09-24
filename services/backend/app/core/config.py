@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # shared secret. Projects on asymmetric signing keys use JWKS instead.
     supabase_jwt_secret: SecretStr | None = None
 
+    # PostgreSQL connection string for the system of record (architecture §7),
+    # e.g. the Supabase session pooler URI. Server-side only; required for
+    # ingestion. Without it, database-backed endpoints fail closed with 503.
+    database_url: SecretStr | None = None
+
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_origins(cls, value: object) -> object:
@@ -79,6 +84,7 @@ class Settings(BaseSettings):
         "supabase_anon_key",
         "supabase_service_role_key",
         "supabase_jwt_secret",
+        "database_url",
         mode="before",
     )
     @classmethod
@@ -96,6 +102,7 @@ class Settings(BaseSettings):
                 for name, value in (
                     ("SUPABASE_URL", self.supabase_url),
                     ("CORS_ORIGINS", self.cors_origins),
+                    ("DATABASE_URL", self.database_url),
                 )
                 if not value
             ]
