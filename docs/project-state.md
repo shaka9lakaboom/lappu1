@@ -48,10 +48,10 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 the owner's explicit approval. **P8 (benchmark + hardening) follows P7** and needs no migration of
 its own (its storage, `benchmark_runs`, is part of 0009). Decisions:
 [ADR 0008](decisions/0008-p7-p8-teacher-admin-hardening.md).
-**Status: P7 IMPLEMENTED AND VALIDATED LOCALLY; STOPPED AT THE MIGRATION APPROVAL GATE.** Migration
-0009 is not on hosted; the final dry run lists exactly `0009_teacher_admin_ops.sql`. Waiting for
-the owner's explicit approval to push it. P8 has not started (beyond the two hardening items that
-touch P7 code: the JWT clock-skew leeway and error redaction).
+**Status: P7 COMPLETE ON HOSTED; P8 IN PROGRESS.** Migration 0009 was pushed on 2026-09-25 with the
+owner's explicit approval ("Approved: 0009 only", after the owner's correction that the teacher
+overview needs a TEACHER membership of that course, with no ADMIN bypass) and verified read-only;
+the hosted P7 acceptance PASSED (see *Hosted acceptance P7*). P8 (benchmark + hardening) follows.
 
 ```
 GET /v1/me · GET /v1/teacher/courses[/{id}/overview]   (profile role from the database)
@@ -74,8 +74,8 @@ every admin mutation: Idempotency-Key -> one transaction -> audit event; no mode
 | Zero model calls | PASS | `test_zero_model_calls` loads every P7 module gateway-free; acceptance V16 (no model run belongs to the run) |
 | Web pages | PASS | vitest 96, lint, typecheck, build; local browser walkthrough 3/3 |
 | Local P7 acceptance | **PASS**: prepare 4/4 · browser 3/3 · verify 16/16 · cleanup 3/3 | `scripts/acceptance_p7.py --local-graph`, `apps/web/e2e/p7-acceptance.spec.ts` |
-| Hosted migration 0009 | **WAITING FOR OWNER APPROVAL** (dry run: exactly 0009) | — |
-| Hosted P7 acceptance | not run (after the push) | — |
+| Hosted migration 0009 | **PASS**: pushed with the owner's approval; 18 catalog checks; data unchanged | See *Database* |
+| Hosted P7 acceptance (disposable accounts, existing course 9440004a, no shared rows, 0 model calls) | **PASS**: prepare 4/4 · browser 3/3 · verify 17/17 · cleanup 5/5 | See *Hosted acceptance P7* |
 
 ### Previous phase: P6 (merged in PR #6, `4a648ac`)
 
@@ -270,8 +270,7 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 
 ## Database
 
-- Next migration: **`0009_teacher_admin_ops.sql`** (ADR 0008), **local only** until the owner
-  approves the push:
+- Latest migration: **`0009_teacher_admin_ops.sql`** (ADR 0008), **on hosted since 2026-09-25**:
   - enums `audit_actor_type`, `audit_action`, `benchmark_mode`, `benchmark_verdict`
   - `audit_events` (server-only, append-only; one row per admin / operator mutation with its
     Idempotency-Key) and `benchmark_runs` (server-only, append-only; written by P8)
@@ -285,7 +284,7 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - *Finding (2026-09-25):* hosted **0002 and 0008 were pushed from CRLF working copies** (the
     CLI stores the file's bytes; the SQL is identical). Migration pins now compare CR-normalized
     statements, and a test requires 0009 to be LF on disk before its push.
-- Latest on hosted: **`0008_verification.sql`** (ADR 0007), **on hosted since 2026-09-25**:
+- Previous: **`0008_verification.sql`** (ADR 0007), **on hosted since 2026-09-25**:
   - enums `verification_state` (PLANNED, READY, IN_PROGRESS, SUBMITTED, EVALUATED, ABANDONED),
     `verification_assessment_type`, `verification_grader_type` (MCQ_EXACT, NUMERIC_TOLERANCE,
     RUBRIC_AI), `verification_evaluator_type` (DETERMINISTIC, AI_RUBRIC)
@@ -362,7 +361,29 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   `0005` and P4 is `0006`. **P5 (feedback + recommendations) is `0007`; P6 verification is
   `0008`; P7 is `0009_teacher_admin_ops.sql` (local only until the owner approves the push); P8
   needs no migration.**
-- Hosted: **`0001`–`0008` applied.**
+- Hosted: **`0001`–`0009` applied.**
+  - **Migration 0009** was pushed on 2026-09-25 with the owner's explicit approval ("Approved: 0009
+    only", with the teacher-overview correction applied and re-tested first), with
+    `npx supabase@2.117.0 db push --linked`.
+    - Before the push: `migration list --linked` showed only 0009 pending; 0001–0008 unchanged
+      (git: only 0009 added since `main` `4a648ac`; blob ids pinned; the CR-normalized applied
+      statements on hosted equal the pgTAP pins); the linked ref `lrjoexzlcadfoyciydkn` equals the
+      backend `SUPABASE_URL`, `DATABASE_URL` and the web `NEXT_PUBLIC_SUPABASE_URL`; 0009 LF on
+      disk; the final dry run listed exactly `0009_teacher_admin_ops.sql`; a READ ONLY snapshot
+      (row counts + content hashes of the 26 tables, the real learner's rows, the statements)
+      was taken with `scripts/hosted_snapshot.py`. Hosted had 0 skill candidates and only STUDENT
+      profiles / memberships.
+    - Verified after the push (READ ONLY): `migration list --linked` local = remote for 0001–0009;
+      0009's recorded statements are LF and equal to the local ones; the 2 tables and 4 enums (all
+      labels); RLS on 28/28 public tables; no client privilege and no policy on the new tables;
+      `anon` has no privilege on any public table and `authenticated` writes none; the 6 triggers;
+      the 5 new functions not executable by clients; the 5 new columns, 9 new checks (validated)
+      and 10 new indexes; `policy_config.teacher_view` as seeded (12 keys); the new tables empty;
+      no job has a manual retry.
+    - Data: only `policy_config` gained its row. `processing_jobs` and the real learner's rows
+      hash differently only because of the two new columns; projected onto the pre-0009 columns
+      both are byte-identical to before the push. Security advisors: still only the pre-existing
+      Auth WARN.
   - **Migration 0008** was pushed on 2026-09-25 with the owner's explicit approval ("Approved:
     0008 only"), with `npx supabase@2.117.0 db push --linked`.
     - Before the push:
@@ -502,6 +523,62 @@ Google can change them, so recheck before a live run. Billing / paid tier stays 
 | Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE`, **P6:** `GENERATE_VERIFICATION`, `GRADE_VERIFICATION` (entity: the verification session) |
 | P6 versions | prompts `verification-generation/v1`, `verification-evaluation/v1` (both ROUTINE tasks); planner `verification-planner/p6-v1`, generator `verification-generator/p6-v1`, validator `verification-validator/p6-v1`, graders `grader/mcq-exact-v1`, `grader/numeric-tolerance-v1`, `grader/short-exact-v1`, evaluator `evaluator/rubric-ai-v1`, evidence `verification/p6-v1`; ledger **`ledger/p6-v1`**, recommendations **`recommendations/p6-v1`** |
 | P5 versions (no model call) | recommendations `recommendations/p5-v1` (Engine 16: REVERIFY → VERIFY (actionable debt, max 2 active) → PREREQUISITE (EMERGING prerequisite) → PRACTICE → NO_ACTION); explanation codes + gates; debt bands NONE/LOW/MODERATE/HIGH at 15/25 |
+
+## Hosted acceptance P7 (2026-09-25): PASS, no model call
+
+Local FastAPI :8001 → hosted Supabase (0001–0009), started from `services/backend/.env` with a
+blank `GEMINI_API_KEY` and `WORKER_ENABLED=false` (no gateway, no worker); local Next.js :3001 →
+hosted Supabase Auth + that backend. Script: `services/backend/scripts/acceptance_p7.py` (prepare,
+the browser walkthrough `apps/web/e2e/p7-acceptance.spec.ts`, verify, cleanup), rehearsed locally
+first. Evidence: `test-results/p7-hosted/` (git-ignored; ids only; cleanup deleted the credentials).
+
+- **No shared rows.** The class is the existing course `9440004a-a25e-4e15-94c0-17c21f6bd695`
+  (24 assessable skills; 1 existing STUDENT member, the real learner). The 3 fixture students
+  joined it with learner-owned STUDENT memberships and P5 evidence on 5 of its canonical skills
+  (production code, no model call); the teacher joined through the admin enrollment endpoint. The
+  small group was a disposable course **with no skills**. No skill_nodes, aliases, edges,
+  course_skills or embeddings were created (counts equal before, during and after).
+- **Six disposable accounts** (hosted Auth signup, `@mailinator.com`): 3 students, a teacher, an
+  outsider teacher, an admin; roles granted by the operator path (`grant_role.change_role`, 3
+  audited ROLE_CHANGE events). All deleted through the Auth admin API at the end.
+- **Two synthetic candidates** named `ACCEPTANCE TEST P7 synthetic candidate …` (no course, no
+  parent), REJECTED only (one in the browser, one over the API) and deleted at cleanup; 0 remain.
+- **The class baseline** (the real learner alone: all 24 skills UNKNOWN, 1 own-work evidence) was
+  read before the fixture joined (READ ONLY) and re-read right before the check with the fixture
+  memberships removed inside a rolled-back transaction; it had not changed.
+- **Concurrent activity.** Another checkout (`lappu1-demo-hotfix`, the live demo) was attached to
+  hosted with a worker: it completed the browser-retried fixture job (a re-run of an analysed,
+  attributed turn: 0 model runs), and its own work added model runs during the window. None of
+  them belongs to the acceptance's accounts, jobs or course.
+
+| # | Check (hosted) | Result |
+| --- | --- | --- |
+| V1 | `GET /v1/me` roles from the database | 3 STUDENT, 2 TEACHER, 1 ADMIN |
+| V2 | `user_metadata {role: ADMIN}` set by the client itself (`PUT /auth/v1/user`) | still STUDENT; admin + teacher routes 403 |
+| V3 | anonymous | 401 on all 17 P7 routes |
+| V4 | matrix (16 routes) | student 403 everywhere; teacher 200 on its class, 403 on admin; outsider teacher 404 on the class overview; **admin 404 on the teacher overview** (not a member) and 200 on the admin course lookup |
+| V5 | teacher list | the class 4 students (not suppressed), the small group 2 (suppressed) |
+| V6 | overview = baseline + fixture, exactly | per-skill states equal for all 24 skills; totals UNKNOWN 87 · EMERGING 3 · DEVELOPING 3 · DEMONSTRATED 3 (96 = 24 × 4); own-work evidence 28 (1 + 27), 4 students with evidence; verification need: comprehensions 3 students; 4 skills worked on by 3 students |
+| V7 | privacy | no fixture or real learner id, no e-mail, no debt / actor / AI-usage field |
+| V8 | suppression | 2 students → cohort size only |
+| V9 | N2 | the teacher's `/v1/courses` and `/v1/ledger` empty; skill detail and recommendations of the class 404 |
+| V10 | admin reads | failed job error redacted (`[redacted-api-key]`, `[redacted-email]`); model runs without `output`; lookup (4 students, 1 teacher); the candidate queue |
+| V11 | retry over the API | FAILED → PENDING (count 1); replay 200 `replayed`; same key + other body 409; again 409 `NOT_FAILED`; one JOB_RETRY audit row (ADMIN) |
+| V12 | the browser's retry and reject | retried once (then completed by the demo worker at 0 model runs); candidate REJECTED; both audited |
+| V13 | REJECT over the API | 200, no skill, no embedding job; replay `replayed`; a second review 409 |
+| V14 | enrollment | replay 200; a STUDENT profile as TEACHER 422 |
+| V15 | audit trail | 3 ROLE_CHANGE, 4 COURSE_MEMBER_ADD, 2 JOB_RETRY, 2 CANDIDATE_REJECT |
+| V16 | zero model calls; real learner | 0 model runs belong to the run; the real learner's rows unchanged |
+| V17 | shared rows | skill_nodes / edges / aliases / course_skills / embeddings unchanged |
+
+**Browser walkthrough (hosted):** 3 passed (teacher overview + suppressed small group; a student's
+forbidden panels; admin overview, retry, reject, model runs, benchmark). 10 screenshots.
+
+**Cleanup:** 6 accounts deleted through the Auth cascade (0 learner-owned rows, 0 memberships, 0
+profiles, 0 auth users); 0 ACCEPTANCE TEST candidates; the small course gone; the class has exactly
+its original member; shared rows unchanged; 0 model runs belonged to the run; the real learner
+unchanged. The 11 audit events stay as the record of the acceptance's admin actions (actor ids now
+null).
 
 ## Hosted acceptance P6 (2026-09-25): PASS on `gemini-3.5-flash-lite`, REAL LIVE PROOF
 
