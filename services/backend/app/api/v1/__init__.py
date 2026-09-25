@@ -2,7 +2,16 @@
 
 from fastapi import APIRouter
 
-from app.api.v1 import activity, courses, events, feedback, ledger, recommendations, skills
+from app.api.v1 import (
+    activity,
+    courses,
+    events,
+    feedback,
+    ledger,
+    recommendations,
+    skills,
+    verifications,
+)
 
 router = APIRouter(prefix="/v1")
 router.include_router(events.router)
@@ -12,3 +21,4 @@ router.include_router(skills.router)
 router.include_router(activity.router)
 router.include_router(feedback.router)
 router.include_router(recommendations.router)
+router.include_router(verifications.router)
