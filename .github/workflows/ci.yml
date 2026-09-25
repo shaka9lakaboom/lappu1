@@ -193,3 +193,87 @@ jobs:
         env:
           E2E_WEB_COMMAND: npm run start
           E2E_REQUIRE: "1"
+
+  e2e-replay:
+    name: E2E replay (API + worker + database + browser, replayed model)
+    runs-on: ubuntu-latest
+    # H13 (P9): sign in -> course -> three captured ChatGPT turns -> the real worker -> Activity ->
+    # Skill Detail -> VERIFY -> Verification Center -> answer -> deterministic grade ->
+    # VERIFICATION evidence -> ledger. Real FastAPI routes, the real durable worker and a real local
+    # Supabase stack (Auth + Postgres). Model output is REPLAYED from the committed Flash-Lite
+    # recording; verification generation (its prompt names the new session) gets a deterministic
+    # challenge. No job has a Gemini key: a request missing from the recording fails.
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: services/backend/pyproject.toml
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Start Supabase (auth, rest, db)
+        run: supabase start -x realtime,storage-api,imgproxy,mailpit,postgres-meta,studio,edge-runtime,logflare,vector,supavisor
+      - name: Export local Supabase connection values
+        run: |
+          supabase status -o env > "$RUNNER_TEMP/status.env"
+          get() { grep "^$1=" "$RUNNER_TEMP/status.env" | head -1 | cut -d= -f2- | sed -E 's/^"(.*)"$/\1/'; }
+          {
+            echo "E2E_SUPABASE_URL=$(get API_URL)"
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(get API_URL)"
+            echo "E2E_DATABASE_URL=$(get DB_URL)"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(get ANON_KEY)"
+            echo "E2E_SERVICE_ROLE_KEY=$(get SERVICE_ROLE_KEY)"
+            echo "E2E_JWT_SECRET=$(get JWT_SECRET)"
+            echo "NEXT_PUBLIC_API_URL=http://localhost:8000"
+          } > "$RUNNER_TEMP/e2e.env"
+          cut -d= -f1 "$RUNNER_TEMP/e2e.env"
+          if grep -qE '=$' "$RUNNER_TEMP/e2e.env"; then echo "a local Supabase value is missing"; exit 1; fi
+          cat "$RUNNER_TEMP/e2e.env" >> "$GITHUB_ENV"
+      - name: Install backend
+        run: python -m pip install -e ".[dev]"
+        working-directory: services/backend
+      - run: npm ci
+      - name: Build web against the local stack
+        run: npm run build:web
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: apps/web
+      - name: Prepare (fixture graphs with replayed embeddings, learner, membership)
+        run: python scripts/e2e_replay.py prepare
+        working-directory: services/backend
+      - name: Start the API + worker on the replay provider
+        working-directory: services/backend
+        run: |
+          nohup python scripts/e2e_replay.py serve > "$RUNNER_TEMP/e2e-serve.log" 2>&1 &
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:8000/health > /dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/e2e-serve.log"
+          exit 1
+      - name: Browser flow (Playwright, production web build)
+        run: npx playwright test e2e/p9-replay-e2e.spec.ts
+        working-directory: apps/web
+        env:
+          E2E_WEB_COMMAND: npm run start
+          E2E_REPLAY_STATE: ${{ github.workspace }}/test-results/e2e-replay/state.json
+      - name: Verify (0 real requests, 0 stale-recording misses, evidence, verification, ledger)
+        run: python scripts/e2e_replay.py verify
+        working-directory: services/backend
+      - name: API + worker log
+        if: always()
+        run: cat "$RUNNER_TEMP/e2e-serve.log" || true
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-replay-results
+          path: |
+            apps/web/test-results
+            test-results/e2e-replay/verify.json
+          if-no-files-found: ignore
