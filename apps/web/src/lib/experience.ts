@@ -440,6 +440,14 @@ export interface MapGroup {
   skills: MappedSkill[];
 }
 
+/** One line per topic card (P9): how many of its skills SkillMirror has a view on. */
+export function topicSummary(group: Pick<MapGroup, 'skills'>): string {
+  const total = group.skills.length;
+  const known = group.skills.filter((s) => s.state !== 'UNKNOWN').length;
+  if (known === 0) return `${total} skill${total === 1 ? '' : 's'} · none known yet`;
+  return `${known} of ${total} with a view · ${total - known} not known yet`;
+}
+
 /**
  * The course graph (topic -> skills) with the learner's ledger overlaid. A graph skill without a
  * ledger entry is UNKNOWN - never 0%.

@@ -20,6 +20,7 @@ import {
   processingOutcomeLabel,
   recommendationText,
   segmentOutcomeLabel,
+  topicSummary,
 } from './experience';
 import { buildFeedbackRequest } from './feedback';
 import { COURSE, ELIGIBLE_DEBT, OTHER_SKILL, SKILL, activityRow, debt, ledgerEntry } from './test-data';
@@ -152,6 +153,16 @@ describe('dashboard counts and skill map', () => {
     const states = Object.fromEntries(groups[0].skills.map((s) => [s.entry.skill.id, s.state]));
     expect(states).toEqual({ [SKILL]: 'DEMONSTRATED', [OTHER_SKILL]: 'UNKNOWN' });
     expect(groups[0].skills.find((s) => s.entry.skill.id === OTHER_SKILL)?.ledger).toBeNull();
+  });
+});
+
+describe('skill map topic summary (P9)', () => {
+  it('says how many skills of a topic have a view, UNKNOWN counted as not known yet', () => {
+    const skill = (state: 'UNKNOWN' | 'DEMONSTRATED') => ({ entry: {} as never, ledger: null, state });
+    expect(topicSummary({ skills: [skill('UNKNOWN'), skill('UNKNOWN')] })).toBe('2 skills · none known yet');
+    expect(topicSummary({ skills: [skill('DEMONSTRATED'), skill('UNKNOWN'), skill('UNKNOWN')] })).toBe(
+      '1 of 3 with a view · 2 not known yet',
+    );
   });
 });
 

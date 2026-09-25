@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ApiError, apiRequest } from '@/lib/api';
 import { COURSE_COOKIE, resolveSelectedCourse } from '@/lib/course-selection';
 import { graphStatusLabel, importanceLabel, isGraphInProgress } from '@/lib/courses';
-import { MASTERY, countStates, overlaySkillMap } from '@/lib/experience';
+import { MASTERY, countStates, overlaySkillMap, topicSummary } from '@/lib/experience';
 import { requireApiSession } from '@/lib/session';
 
 export default async function SkillMapPage({ searchParams }: PageProps<'/skills'>) {
@@ -90,12 +90,21 @@ export default async function SkillMapPage({ searchParams }: PageProps<'/skills'
               <Card key={group.topic?.id ?? 'other'} data-testid="topic-group">
                 <CardHeader>
                   <CardTitle className="text-base">{group.topic?.canonical_name ?? 'Other skills'}</CardTitle>
+                  <p className="text-xs font-medium text-muted-foreground" data-testid="topic-summary">
+                    {topicSummary(group)}
+                  </p>
                   {group.topic ? <CardDescription>{group.topic.description}</CardDescription> : null}
                 </CardHeader>
                 <CardContent>
                   <ul className="divide-y">
                     {group.skills.map(({ entry, state, ledger: row }) => (
-                      <li key={entry.skill.id} data-testid="skill-map-row" data-skill-id={entry.skill.id} data-state={state}>
+                      <li
+                        key={entry.skill.id}
+                        className={entry.skill.node_kind === 'SUBSKILL' ? 'pl-3' : undefined}
+                        data-testid="skill-map-row"
+                        data-skill-id={entry.skill.id}
+                        data-state={state}
+                      >
                         <Link
                           href={`/skills/${entry.skill.id}`}
                           className="flex flex-wrap items-center justify-between gap-2 py-2.5 hover:underline"
@@ -106,7 +115,10 @@ export default async function SkillMapPage({ searchParams }: PageProps<'/skills'
                             <MasteryBadge state={state} />
                           </span>
                         </Link>
-                        <p className="-mt-1 pb-2 text-xs text-muted-foreground">{importanceLabel(entry.importance)}</p>
+                        <p className="-mt-1 pb-2 text-xs text-muted-foreground">
+                          {entry.skill.node_kind === 'SUBSKILL' ? 'Part of a larger skill · ' : ''}
+                          {importanceLabel(entry.importance)}
+                        </p>
                       </li>
                     ))}
                   </ul>
