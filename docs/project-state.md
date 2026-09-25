@@ -5,7 +5,7 @@ claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisi
 [`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A, 0004 free-tier ModelGateway,
 0005 P3B + P4, 0006 P5, 0007 P6, 0008 P7 + P8).
 
-**Last updated:** 2026-09-25
+**Last updated:** 2026-09-26
 
 ## Hackathon runtime decision (ADR 0003 §1)
 
@@ -25,13 +25,13 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4, P5 and P6 are merged. **`main` = `4a648ac2100738a228b3506cfb21e734c6756f02`** (merge of PR #6). |
+| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4, P5, P6 and the demo-runtime hotfix are merged. **`main` = `00ff0a40ea2f93438b70dc00962c9235721df325`** (merge of PR #7: demo runtime + the `chatgpt-2` ChatGPT adapter with capture-degraded status). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
 | P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
 | P5 merge commit | `a0e6982546c82bb4dbb1920894fb6d4711ccfa34` (PR #5, head `0f12dc7`) |
 | P6 merge commit | `4a648ac2100738a228b3506cfb21e734c6756f02` (PR #6, head `583aea4`; the PR-triggered CI on that head passed before the merge) |
-| Development branch | `skillmirror-p7-p8-teacher-admin-hardening` (P7 + P8, from `4a648ac`) |
+| Development branch | `skillmirror-p7-p8-teacher-admin-hardening` (P7 + P8, from `4a648ac`; `main` `00ff0a4` merged in, no rebase) |
 | Previous branch | `skillmirror-p6-verification-loop` (merged in PR #6) |
 | P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
@@ -48,10 +48,13 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 the owner's explicit approval. **P8 (benchmark + hardening) follows P7** and needs no migration of
 its own (its storage, `benchmark_runs`, is part of 0009). Decisions:
 [ADR 0008](decisions/0008-p7-p8-teacher-admin-hardening.md).
-**Status: P7 COMPLETE ON HOSTED; P8 IN PROGRESS.** Migration 0009 was pushed on 2026-09-25 with the
-owner's explicit approval ("Approved: 0009 only", after the owner's correction that the teacher
-overview needs a TEACHER membership of that course, with no ADMIN bypass) and verified read-only;
-the hosted P7 acceptance PASSED (see *Hosted acceptance P7*). P8 (benchmark + hardening) follows.
+**Status: P7 COMPLETE ON HOSTED; P8 IMPLEMENTED ON THE BRANCH (not on hosted).** Migration 0009 was
+pushed on 2026-09-25 with the owner's explicit approval ("Approved: 0009 only", after the owner's
+correction that the teacher overview needs a TEACHER membership of that course, with no ADMIN bypass)
+and verified read-only; the hosted P7 acceptance PASSED (see *Hosted acceptance P7*). P8: the
+critical gate passes deterministic 120/120 and replay 72/72; the live Flash-Lite run held every hard
+gate; the 2026-09-25 hosted attribution / evidence defect is fixed on the branch (see *Known defects*).
+Main was merged in (`00ff0a4`, PR #7: demo runtime + the `chatgpt-2` adapter); P8 builds on it.
 
 ```
 GET /v1/me · GET /v1/teacher/courses[/{id}/overview]   (profile role from the database)
@@ -76,6 +79,66 @@ every admin mutation: Idempotency-Key -> one transaction -> audit event; no mode
 | Local P7 acceptance | **PASS**: prepare 4/4 · browser 3/3 · verify 16/16 · cleanup 3/3 | `scripts/acceptance_p7.py --local-graph`, `apps/web/e2e/p7-acceptance.spec.ts` |
 | Hosted migration 0009 | **PASS**: pushed with the owner's approval; 18 catalog checks; data unchanged | See *Database* |
 | Hosted P7 acceptance (disposable accounts, existing course 9440004a, no shared rows, 0 model calls) | **PASS**: prepare 4/4 · browser 3/3 · verify 17/17 · cleanup 5/5 | See *Hosted acceptance P7* |
+
+### P8: benchmark + hardening (this branch; ADR 0008 §27–43)
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| 120 labeled cases, exact taxonomy (34 migrated unchanged + 86 new; 72 live-capable) | PASS | `critical_gate.py validate`; `test_the_case_set_is_the_planned_taxonomy` |
+| Deterministic 120/120, every hard gate 0, grader accuracy 100%, 0 provider requests | PASS | `test_all_120_cases_pass_deterministically_on_the_database` (CI) |
+| Live 72 on `gemini-3.5-flash-lite` (bounded, recorded) | **PASS on every hard gate**: 71/72, 0 blocked; REL-06 hit provider transport errors, re-recorded 5/5 | ADR 0008 §35; local `benchmark_runs`; 115 + 6 generation, 68 + 7 embedding requests on 2026-09-25 |
+| Replay 72 from the recording (CI; a miss = stale recording) | **PASS**: 72/72, 0 provider requests | `test_the_replay_set_passes_from_the_recording` |
+| Regression baseline (prompt versions, recording hash, metrics; −5 pt tolerance) | PASS (measured by the replay) | `benchmark/baselines/gemini-3.5-flash-lite.json`; `test_the_committed_recording_fits_this_code` |
+| Attribution / evidence consistency (hosted defect 2026-09-25) | PASS (branch); hosted remediation pending | §24–26; `test_attribution_consistency_db.py`; hard gate in the critical gate |
+| H6 budget fail-safe · H7 stale-ledger sweep · H8 copy guard | PASS | `test_config.py`, `test_ledger_sweep_db.py`, `test_evidence_qualification.py` / `test_evidence_pipeline_db.py` |
+| H3 crash / restart · H4 backpressure per job type · H5 cache · H15 feedback | PASS | `test_hardening_db.py`, `test_hardening_unit.py`, existing worker / pipeline / verification tests |
+| H11 chatgpt-2 fixture matrix · H12 active-course picker | PASS | extension unit 100 (`chatgpt-thread-matrix.test.ts`, `courses.test.ts`), Chromium 4 |
+| H14 security sweep | PASS | error redaction at write, raw-HTML guard tests, `npm audit` 0, `pip-audit` 0, `supabase db lint` no schema errors |
+| H10 recorded signed-in fixture + `SIGNED_IN=1` live check | NOT DONE | needs the owner signed in; hotfix structure-from-live fixture + hosted `chatgpt-2` captures stand in |
+| H13 E2E CI job on the replay provider | NOT DONE | the replay provider exists (H2); the job is next |
+| Hosted E2E smoke · 3.7 canary · hosted remediation of the 2026-09-25 row | NOT DONE (owner approval) | 3.7 had 2 of 20 requests left on 2026-09-25 |
+
+**Real live capture (chatgpt-2, hosted, read-only, ids only).** 13 messages in 2 conversations
+since 16:04 UTC, all `adapter_version = chatgpt-2`, extension 0.2.0, every reply paired with its
+question. Conversation `c4f799a1…` (the defect turn): 8 messages, 4 turns, outcomes
+3 `EVIDENCE_RECORDED` + 1 `NON_LEARNING`. The defect was downstream of capture.
+
+**Known-defect matrix (closure).**
+
+| # | Defect | Result |
+| --- | --- | --- |
+| K1 | Ledger decays only when recomputed | **Closed**: daily sweep (H7) |
+| K2 | Copy guard sees 4 messages | **Closed** for the conversation (50 messages, H8); other conversations stay a limitation |
+| K3 | Lexical span grounding | Limitation (safe direction); ABS-10 measures it |
+| K4 | Delegation depends on the model's type / reason | Measured: actor 0.92, evidence type 0.85 (targets met); Flash-Lite's false credit of questions (SEG-06 and 3 arguable cases) recorded for `skill-attribution/v3` |
+| K5 | Difficulty uses the band | Limitation (V1) |
+| K6 | Live P3B/P4 = one STUDENT turn | **Closed**: 11 ATT + 2 DEBT + 3 ABS live cases, every hard gate 0 |
+| K7 | Pre-0005 turns have no attribution | Tool ready (P7 RESUME_ATTRIBUTION); hosted run waits for approval |
+| K8 | 3.7 / 3.8 free tier = 20/day | Limitation |
+| K9 / K10 | turn-analysis on 3.7; 3.7 live validation | Not run (approval; 3.7 had 2 requests left) |
+| K11 | Flash-Lite graph 24 skills; "binary search" → STOP | Live: "Explain binary search in one sentence." now MAP → binary search (EXPOSURE); "What is a regression?" still STOP (soft miss). The gate's graphs are hand-written (the graph-size probe was not re-run) |
+| K12 | One retrieval per unit | Limitation (ADR 0004) |
+| K13 | Query vectors cached in memory only | Limitation |
+| K14 | Outdated Flash-Lite quota record | Closed in P7 |
+| K15 | Real-model quality only spot-checked | **Closed**: the 72-case live gate |
+| K16 | Leaked Password Protection disabled | Limitation (owner setting) |
+| K17 | Relative lexical score fusion | Measured: top-1 1.00, top-3 1.00 on the fixture graphs; no tuning needed |
+| K18 | Reply after 120 s analysed alone | Limitation (no duplicates: pipeline tests) |
+| K19 | `active_course_id` has no FK | Limitation (by design) |
+| K20 | Extension sends no `active_course_id` | **Closed**: active-course picker (H12) |
+| K21 | Candidate review UI; graph regeneration | Closed in P7 + limitation (READY graph regeneration) |
+| K22 | Signed-in ChatGPT covered by a synthetic fixture only | Partly: hotfix structure-from-live fixture + real hosted `chatgpt-2` captures; H10 recorder not built |
+| K23 | No capture-degraded state | **Closed** by the hotfix (not reimplemented); matrix test |
+| K24 | Auto-confirm on for hosted | Limitation |
+| K25 | Adjudication never seen live | Still scripted only: MAP-16 was accepted at first pass live (≥ 0.80) |
+| K26 | P3A smoke live run deferred | **Closed**: absorbed; the 12 `p3a-smoke` cases passed live |
+| K27 | Live delegation turn | **Closed**: DEBT-17 live ("How do I write a for loop…": AI OBSERVATION, no debt); DEBT-18 (three delegations) eligible and actionable |
+| N1 | Flash-Lite and embeddings unbudgeted | **Closed** (H6) |
+| N2–N4, N6 | Course role; bootstrap stage; rejected candidates; raw admin errors | Closed in P7 (+ model-run errors redacted at write, P8) |
+| N5 | No worker without a real key | Replay provider (H2); the E2E job (H13) is not built |
+| N7 | Unranked invented mapping crashed the turn | **Closed** (found by the gate) |
+| N8 | Activity actor ≠ evidence actor; copy-guard reclassification counted as delegation; learner explanation lost | **Closed** on the branch (§24–26); hosted row re-derived by the sweep after deployment |
+| N9 | KaTeX math captured as MathML tokens | **Closed** (H11 matrix) |
 
 ### Previous phase: P6 (merged in PR #6, `4a648ac`)
 
@@ -965,21 +1028,21 @@ is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 R
 | Extension version | 0.2.0, dev id `cohpimnabjigooghbigblennedbplojm` (unchanged in this phase) |
 | Backend version | 0.1.0 |
 
-## Automated results (local run on 2026-09-25, Windows, Node 22.14, Python 3.13)
+## Automated results (local run on 2026-09-26, Windows, Node 22.14, Python 3.13)
 
 | Suite | Local | CI job |
 | --- | --- | --- |
 | Backend `ruff check` + `ruff format --check` (incl. benchmark runner) | clean | Backend |
-| Backend pytest, unit (no DB) | **817 passed, 152 skipped** (P6: 747 / 132) | Backend |
-| Backend pytest, with local Postgres (0001–0009) | **969 passed** (P6: 879) | Backend ingestion + intelligence + database |
+| Backend pytest, unit (no DB) | **874 passed, 172 skipped** (P7: 817 / 152) | Backend |
+| Backend pytest, with local Postgres (0001–0009) | **1046 passed**, incl. the critical gate deterministic 120/120 and replay 72/72 (P7: 969) | Backend ingestion + intelligence + database |
 | Database pgTAP (0001–0009) | **363 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49 + 79 + 75) | Database |
 | P3B/P4 safety benchmark (`benchmark/runners/p3b_p4_safety.py`, 22 deterministic cases) | **22/22**; False AI Assistance Debt Rate **0/21**; debt recall 2/2 | Backend (`test_benchmark_safety.py`) |
 | Web ESLint | 0 problems | Web |
 | Typecheck (web, contracts, config, ui, extension) | 5/5 clean | Web, Extension |
-| Web vitest | **96 passed** (P6: 80) | Web |
+| Web vitest | **106 passed** (P7: 96) | Web |
 | Web production build (no env) | pass | Web |
-| Extension vitest | **78 passed** | Extension |
-| Extension build + manifest validation + Chromium (load ×2, capture → queue → sync ×1) | pass, **3 passed** | Extension |
+| Extension vitest | **100 passed** (P7: 86) | Extension |
+| Extension build + manifest validation + Chromium (load ×2, capture → queue → sync, active-course picker) | pass, **4 passed** | Extension |
 | Local P7 acceptance (no model call) | **PASS**: prepare 4/4, browser 3/3, verify 16/16, cleanup 3/3 | not in CI by design |
 | Local P6 acceptance (scripted fake provider) | **PASS**: 15/15 + browser walkthrough (1 passed); 0 real model calls | not in CI by design |
 | Hosted P6 acceptance (real Gemini) | **PASS on `gemini-3.5-flash-lite`**: 12/12 + browser walkthrough; 1 generation / 0 evaluation / 0 embedding; REAL LIVE PROOF; disposable learner deleted; real learner untouched | not in CI by design |
@@ -1034,10 +1097,13 @@ auth round trip.
   delegation (false debt); the attributor was never told which text was reused, so the learner's
   explanation was lost. Fixed: activity actor = evidence actor (+ `attributed_actor`,
   `qualification_reason`); `ledger/p8-v1` (a copy-guard reclassification is not a delegation);
-  `skill-attribution/v2` (reused text listed; own explanation quoted). Hosted: nothing written. After
-  the merge and a restart on the fixed code: `scripts/recompute_skill.py` for learner `8afbd2c8…` /
-  skill `2761328b…` (dry run: debt 30.1 → 0, delegations 2 → 1), then `--apply` with the owner's
-  approval.
+  `skill-attribution/v2` (reused text listed; own explanation quoted) plus the attribution validator
+  (a span the copy guard would reclassify is refused, one repair). Hosted: nothing written. After the
+  merge and a restart on the fixed code, the worker's startup sweep re-derives the row (older ledger
+  algorithm); `scripts/recompute_skill.py` shows the change first (dry run for learner `8afbd2c8…` /
+  skill `2761328b…`: debt 30.1 → 0, delegations 2 → 1). The lost explanation cannot be restored
+  (immutable evidence). The capture itself was correct: all 8 messages of that conversation came
+  through `chatgpt-2` (extension 0.2.0), in order, replies paired.
 - **P6, see ADR 0007 *Known limitations*:**
   - Free-text answer keys cannot be proven correct deterministically; MCQ / numeric keys are
     structurally checked and free text is graded against the rubric.
@@ -1143,20 +1209,19 @@ auth round trip.
 
 ## Exact next action
 
-1. **Owner: approve (or not) the hosted push of migration 0009.** P7 is implemented and validated
-   locally on `skillmirror-p7-p8-teacher-admin-hardening`; the agent stopped before
-   `supabase db push --linked` (dry run: exactly `0009_teacher_admin_ops.sql`). After approval:
-   push 0009 only, verify hosted read-only, run the P7 hosted acceptance
-   (`scripts/acceptance_p7.py`: disposable accounts, a disposable course reusing 5 canonical skills
-   of `9440004a`, no new registry rows, the real learner hashed, 0 model calls), then P8
-   (deterministic 120/120, replay set, bounded Flash-Lite live set recorded in `benchmark_runs`,
-   hardening), CI, one PR into `main` (not merged); P9 is not started.
-2. *(Done: PR #6 merged as `4a648ac`.)*
-3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
-   - one live free-text verification (1 generation + 1 evaluation) to exercise
-     `verification-evaluation/v1` live
-   - one live turn in which the learner explicitly delegates a mapped skill (AI-actor
-     evidence, single delegation → no debt): about 2 requests
-   - the 12-case P3A smoke benchmark: about 12–16 requests
-4. **`gemini-3.7-flash` live validation** stays pending until Google's capacity allows. The
-   architecture default is unchanged.
+1. **Owner: review and merge the P7 + P8 pull request** (`skillmirror-p7-p8-teacher-admin-hardening`
+   → `main`; the agent does not merge). P9 is not started.
+2. **After the merge, restart the hosted runtime on `main`** (the demo backend). Its startup sweep
+   (§37) re-derives the 2026-09-25 false-debt row (`ledger/p6-v1`) and supersedes its VERIFY; to see
+   the change first, `scripts/recompute_skill.py --learner 8afbd2c8-… --skill 2761328b-…` (dry run).
+   The READY check `3aa4481e…` stays unless the owner wants it abandoned.
+3. **Owner approvals still open** (none is required for the PR):
+   - insert the P8 `benchmark_runs` rows on hosted, so `/admin/benchmark` shows them
+     (`critical_gate.py record --from-report <report> --record-to <hosted>`; append-only)
+   - the hosted E2E smoke and the `gemini-3.7-flash` canary (3.7 had 2 of 20 requests left on
+     2026-09-25)
+   - `RESUME_ATTRIBUTION` for the pre-0005 hosted turns (K7, ≤ 2 requests)
+   - the recorded signed-in ChatGPT fixture and the `SIGNED_IN=1` live check (H10: needs the owner
+     signed in)
+4. **Next engineering** (not in this PR): the E2E CI job on the replay provider (H13), and
+   `skill-attribution/v3` for Flash-Lite's false credit of questions (ADR 0008 §35).

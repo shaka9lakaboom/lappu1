@@ -1,0 +1,69 @@
+{
+  "set": "critical-gate",
+  "version": "v1",
+  "model": "gemini-3.5-flash-lite",
+  "prompt_versions": {
+    "turn_analysis": "turn-analysis/v1",
+    "turn_adjudication": "turn-adjudication/v1",
+    "attribution": "skill-attribution/v2",
+    "verification_generation": "verification-generation/v1",
+    "verification_evaluation": "verification-evaluation/v1",
+    "query_embedding": "retrieval-query/v1",
+    "skill_embedding": "skill-embedding-text/v1"
+  },
+  "policy_hash": "d6af3a0604aa70421aef98f4a15c14d56e8d676ed95020c0c40af65cba759c84",
+  "code_sha": "fe1573111b99ae384ca969819f8fba9b52fe4c5f",
+  "measured_by": "replay",
+  "measured_at": "2026-09-25T18:48:01.736739+00:00",
+  "recording": {
+    "path": "recordings/gemini-3.5-flash-lite.jsonl",
+    "sha256": "1ebf8d01711c90da8360de961d80219adff262f74198d15fdcccdd9e43cbb16c",
+    "entries": 193
+  },
+  "cases": 72,
+  "passed": 72,
+  "provider_requests": 0,
+  "hard_gates": {
+    "false_ai_assistance_debt": 0,
+    "single_interaction_debt_eligibility": 0,
+    "unknown_presented_as_weak": 0,
+    "mastery_from_exposure_or_observation": 0,
+    "verified_without_verification": 0,
+    "invented_or_non_candidate_skills": 0,
+    "successful_prompt_injection": 0,
+    "evidence_on_must_abstain": 0,
+    "replay_duplicates": 0,
+    "invalid_verification_items_delivered": 0,
+    "deterministic_grader_errors": 0,
+    "attribution_evidence_inconsistency": 0,
+    "deterministic_grader_accuracy": 1.0
+  },
+  "metrics": {
+    "relevance_precision": 1.0,
+    "relevance_recall": 0.875,
+    "skill_bearing_precision": 1.0,
+    "skill_bearing_recall": 0.9333,
+    "top1_mapping": 1.0,
+    "top3_recall": 1.0,
+    "actor_accuracy": 0.9231,
+    "evidence_type_accuracy": 0.85,
+    "abstention_precision": 0.0,
+    "verification_acceptance": 1.0,
+    "rubric_grading_accuracy": 1.0,
+    "debt_recall": 1.0
+  },
+  "targets": {
+    "relevance_precision": 0.9,
+    "relevance_recall": 0.85,
+    "skill_bearing_precision": 0.85,
+    "skill_bearing_recall": 0.8,
+    "top1_mapping": 0.75,
+    "top3_recall": 0.9,
+    "actor_accuracy": 0.85,
+    "evidence_type_accuracy": 0.75,
+    "abstention_precision": 0.9,
+    "verification_acceptance": 0.8,
+    "rubric_grading_accuracy": 0.85,
+    "debt_recall": 0.67
+  }
+}

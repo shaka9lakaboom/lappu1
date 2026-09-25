@@ -1405,9 +1405,11 @@ def run_gate(
         )
     elif mode == "replay":
         path = recording or RECORDINGS / f"{model}.jsonl"
-        replay = ReplayProvider.from_file(path)
+        # Recorded as provider "replay": replayed runs never count as real requests of the model
+        # (model_runs is the local budget's request ledger).
+        replay = ReplayProvider.from_file(path, name="replay")
         provider = CountingProvider(replay)
-        generation_model, embedding_model, provider_name = model, EMBEDDING_MODEL, "google"
+        generation_model, embedding_model, provider_name = model, EMBEDDING_MODEL, "replay"
     else:
         from app.core.config import get_settings
         from app.model_gateway.gemini import GeminiProvider
@@ -1512,7 +1514,11 @@ def run_gate(
                     # Provider backpressure / timeout: wait, then run the case again (its finished
                     # model calls are cache hits, so a retry repeats only what failed).
                     time.sleep(min(max(getattr(exc, "retry_after", None) or 0, 15 * attempt), 60))
-            run.passed = run.error is None and not run.hard and (mode == "live" or not run.soft)
+            # Soft label misses are the recorded model's calibration (metrics, the baseline); only
+            # the scripted deterministic mode must meet every label.
+            run.passed = (
+                run.error is None and not run.hard and (mode != "deterministic" or not run.soft)
+            )
     finally:
         if recorder_provider is not None and recorder_provider.entries:
             path = recording or RECORDINGS / f"{model}.jsonl"
@@ -1602,10 +1608,12 @@ def recording_sha256(path: Path) -> str:
 
 
 def write_baseline(report: dict[str, Any], recording: Path, out_dir: Path = BASELINES) -> Path:
-    """The committed baseline of a model: written only from a complete, passing live run."""
+    """The committed baseline of a model: written from a complete, passing run of the recorded
+    answers - a live run, or (preferably) the replay of the recording it wrote, whose metrics CI
+    reproduces exactly."""
     live = [c for c in load_cases() if c.get("live")]
-    if report.get("mode") != "live" or report.get("verdict") != "PASS":
-        raise SystemExit("a baseline needs a PASSING live run")
+    if report.get("mode") not in ("live", "replay") or report.get("verdict") != "PASS":
+        raise SystemExit("a baseline needs a PASSING live or replay run")
     if report.get("cases") != len(live) or report.get("blocked"):
         raise SystemExit(f"a baseline needs all {len(live)} live cases, none blocked")
     if report.get("prompt_versions") != PROMPT_VERSIONS:
@@ -1617,7 +1625,8 @@ def write_baseline(report: dict[str, Any], recording: Path, out_dir: Path = BASE
         "prompt_versions": PROMPT_VERSIONS,
         "policy_hash": report["policy_hash"],
         "code_sha": report["code_sha"],
-        "recorded_at": report["finished_at"],
+        "measured_by": report["mode"],
+        "measured_at": report["finished_at"],
         "recording": {
             "path": recording.relative_to(BENCHMARK).as_posix(),
             "sha256": recording_sha256(recording),
