@@ -189,6 +189,19 @@
     tests assert that `model_runs` never grows across all P5 endpoints and corrections. The
     acceptance runs the backend without `GEMINI_API_KEY` and checks `model_runs` before and after.
 
+## Validation (2026-09-25)
+
+23. **Local.** The full local stack (Auth + Postgres + FastAPI without a Gemini key + Next.js) passed
+    10/10 API checks and the browser walkthrough (`scripts/acceptance_p5.py`,
+    `e2e/p5-acceptance.spec.ts`).
+24. **Hosted.** Migration 0007 was pushed with the owner's approval and verified read-only.
+    - The hosted acceptance (`scripts/acceptance_p5_hosted.py`) passed 12/12 and the browser
+      walkthrough, with 0 generation and 0 embedding requests.
+    - It used one disposable learner on five **existing** canonical skills of the P2 course, so no
+      registry row was created. That learner was deleted through the Auth cascade.
+    - The real P3B/P4 learner was only read (in a rolled-back transaction); a hash of its rows was
+      unchanged.
+
 ## Known limitations
 
 - A learner can exclude any of their captured-activity evidence, including unfavourable
