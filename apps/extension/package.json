@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "test": "playwright test",
     "test:unit": "vitest run",
-    "acceptance:live": "playwright test --config playwright.live.config.ts"
+    "acceptance:live": "playwright test --config playwright.live.config.ts",
+    "fixture:signed-in": "node scripts/build-signed-in-recording.mjs"
   },
   "dependencies": {
     "@skillmirror/config": "0.1.0",
