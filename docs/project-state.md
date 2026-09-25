@@ -25,25 +25,36 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1 and P2 + P3A are merged. **`main` = `08260a397fb5b41d709b3c4074836cc7e21646da`** (merge of PR #3). |
+| Default branch | `main`. P0, P1, P2 + P3A and P3B + P4 are merged. **`main` = `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8`** (merge of PR #4). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
-| Development branch | `skillmirror-p3b-p4-evidence-mastery-debt` (P3B + P4, from `08260a3`) |
-| Previous branch | `skillmirror-p2-p3a-intelligence-foundation` |
-| P3B + P4 commits | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
+| P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
+| Development branch | `skillmirror-p5-student-experience` (P5, from `ab2d73d`) |
+| Previous branch | `skillmirror-p3b-p4-evidence-mastery-debt` (merged in PR #4) |
+| P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | P2 + P3A commits (merged) | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
-| CI (P3B + P4) | run on the pushed branch head; result recorded in the pull request |
+| CI (P3B + P4) | green on the PR #4 head before the merge |
 | CI (P2 + P3A) | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P3B + P4 → `main`: opened after CI is green; **not merged** by the agent. P2 + P3A: PR #3, **merged** as `08260a3` |
+| Pull request | P5 → `main`: opened after CI is green; **not merged** by the agent. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
-**Current phase: P3B — Attribution + EvidenceEvents and P4 — Mastery + Evidence Ledger + AI
-Assistance Debt.** Decisions: [ADR 0005](decisions/0005-p3b-p4-evidence-mastery-debt.md).
-**Status: COMPLETE. MIGRATIONS 0001–0006 ON HOSTED (0005 + 0006 pushed 2026-09-25 with the
-owner's approval). The real P3B/P4 acceptance PASSED on `gemini-3.5-flash-lite` (the hackathon
-operational runtime): 1 `TURN_ANALYSIS` + 1 `SKILL_ATTRIBUTION` + 1 embedding.**
+**Current phase: P5 — Complete Student Experience** (dashboard, Skill Map, Skill Detail with
+"Why?", enriched Activity, corrections, deterministic recommendations). Branch
+`skillmirror-p5-student-experience` from `main` `ab2d73d`. **Status: IN PROGRESS.** Hosted
+migrations are **0001–0006**; P5 adds **0007** (feedback + recommendations), which is pushed to
+hosted only after the owner's explicit approval. P6 verification will be **0008**. P5 makes no
+model call (0 generation, 0 embedding requests).
+
+### Previous phase: P3B + P4 (merged in PR #4)
+
+**P3B — Attribution + EvidenceEvents and P4 — Mastery + Evidence Ledger + AI Assistance Debt.**
+Decisions: [ADR 0005](decisions/0005-p3b-p4-evidence-mastery-debt.md).
+**Status: COMPLETE and MERGED (PR #4, `ab2d73d`). MIGRATIONS 0001–0006 ON HOSTED (0005 + 0006
+pushed 2026-09-25 with the owner's approval). The real P3B/P4 acceptance PASSED on
+`gemini-3.5-flash-lite` (the hackathon operational runtime): 1 `TURN_ANALYSIS` + 1
+`SKILL_ATTRIBUTION` + 1 embedding.**
 
 ```
 raw turn → P3A mapping (unchanged) → per MAPPED segment ONE SKILL_ATTRIBUTION call
@@ -190,7 +201,8 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
     first-attempt success
   - a cache lookup index and a provider-request (budget) index
 - **Migration numbering:** `0004` is the free-tier ModelGateway/cache optimisation; P3B is
-  `0005` and P4 is `0006`. P5+ continue from `0007`.
+  `0005` and P4 is `0006`. **P5 (feedback + recommendations) is `0007`; P6 verification is
+  `0008`.**
 - Hosted: **`0001`–`0006` applied.**
   - **Migrations 0005 + 0006** were pushed together on 2026-09-25 with the owner's approval.
     - Before the push:
@@ -555,11 +567,10 @@ auth round trip.
 
 ## Exact next action
 
-1. **Review and merge the P3B + P4 pull request** (`skillmirror-p3b-p4-evidence-mastery-debt`
-   → `main`) once its CI is green. The agent does not merge it.
-2. **Then P5** (student experience: dashboard, skill detail, explanations) on a new branch from
-   the updated `main`. Its migrations start at `0007`. P5 reads `GET /v1/ledger`; its
-   recommendation surface can use `debt_actionable` and `debt_components`.
+1. **P5 (in progress)** on `skillmirror-p5-student-experience`: migration `0007`, the student
+   pages, corrections and deterministic recommendations. Migration 0007 goes to hosted only
+   after the owner's explicit approval.
+2. The P3B + P4 pull request was merged as PR #4 (`ab2d73d`).
 3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
    - one live turn in which the learner explicitly delegates a mapped skill (AI-actor
      evidence, single delegation → no debt): about 2 requests
