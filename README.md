@@ -4,13 +4,17 @@
 learner demonstrated from what they delegated, and verifies skills that still lack
 independent evidence.
 
+- **Run the demo: [`docs/demo-runbook.md`](docs/demo-runbook.md)** (Windows first: setup, start,
+  the exact demo flow, troubleshooting, cleanup, known limitations)
 - Architecture (frozen V1 source of truth): [`docs/architecture/`](docs/architecture/)
 - Live implementation status: [`docs/project-state.md`](docs/project-state.md)
-- Implementation decisions: [`docs/decisions/`](docs/decisions/)
+- Implementation decisions: [`docs/decisions/`](docs/decisions/) (ADR 0001–0009)
 
-Current phase: **P2 — Courses + Skill Graph and P3A — Qualification + Retrieval + Mapping**
-(see [`docs/project-state.md`](docs/project-state.md) for the verified status). Attribution,
-evidence, mastery and verification are later phases.
+Status: P0–P8 are complete and merged; **P9 — local demo integration + final hardening** is on its
+branch (see [`docs/project-state.md`](docs/project-state.md) for every verified gate). Capture,
+course skill graphs, attribution, evidence, mastery, AI Assistance Debt, recommendations,
+verification, the teacher overview, admin operations and the intelligence benchmark are all
+implemented.
 
 SkillMirror is a **local-first hackathon application**: an unpacked Chrome extension, the
 Next.js web app on `localhost:3000` and the FastAPI backend on `localhost:8000`, backed by a
@@ -29,10 +33,12 @@ packages/
   config/         Shared constants (tunable policy lives in the policy_config table)
   ui/             Shared UI utilities
 supabase/
-  migrations/     Numbered SQL migrations (0001 foundation, 0002 capture, 0003 courses + skill graph)
+  migrations/     Numbered SQL migrations 0001–0009 (foundation, capture, courses + skill graph, model
+                  cache, attribution + evidence, mastery + debt, student experience, verification,
+                  teacher / admin + benchmark)
   seed/           Local seed (intentionally empty: no fake data)
   tests/          pgTAP tests for migrations and RLS
-benchmark/        Intelligence benchmark schema, cases, labels, runners (P3A smoke set)
+benchmark/        Intelligence benchmark: 120-case critical gate, fixtures, Flash-Lite recording, runners
 docs/             Architecture, decisions, project state
 .github/workflows/ci.yml
 ```
@@ -40,8 +46,9 @@ docs/             Architecture, decisions, project state
 ## Prerequisites
 
 - Node.js 22.12+ (see `.nvmrc`) and npm 10+
-- Python 3.12+
-- A Supabase project (hosted), or the Supabase CLI + Docker for a local stack
+- Python 3.13 (3.12+ works)
+- A hosted Supabase project with migrations 0001–0009 (the Supabase CLI + Docker only for local tests)
+- A Google AI (Gemini) API key on the free tier (the demo uses `gemini-3.5-flash-lite`)
 
 ## Install
 
@@ -122,12 +129,18 @@ unpacked** → select `apps/extension/dist`.
 ### Live demo (hackathon free-tier runtime)
 
 ```bash
-npm run demo:check     # preflight: env files (names only), backend venv, ports 8000/3000
+npm run build:extension
+npm run demo:check     # preflight: env files (names only), ports, venv, model route (validated by the
+                       # backend's own settings), extension build + its localhost config
 npm run demo           # backend + worker (:8000) and web (:3000) in one terminal; Ctrl+C stops both
+npm run demo:verify    # with the demo running, read only: health, web, hosted DB + migrations,
+                       # worker, Flash-Lite route, extension build
 npm run demo:backend   # or each on its own
 npm run demo:web
-npm run build:extension
 ```
+
+The full procedure, the prepared VERIFY example for the verification demo and the exact demo
+flow are in [`docs/demo-runbook.md`](docs/demo-runbook.md).
 
 `npm run demo` starts the backend on the free-tier runtime (ADR 0004): every generation task,
 the course bootstrap included, on `gemini-3.5-flash-lite` (12 requests/min, daily budget
@@ -150,6 +163,7 @@ npm run test:backend      # pytest (venv active)
 npm run lint
 npm run typecheck         # all workspaces
 npm run test:web          # vitest unit tests
+npm run test:demo         # demo launcher preflight / verify tests
 npm run build             # web + extension production builds
 npm run test:extension    # loads dist/ in Chromium (run `npx playwright install chromium` once)
 npm run e2e:auth          # real Supabase auth round trip (see below)
@@ -176,7 +190,10 @@ Without configuration the test is skipped, never passed.
 `.github/workflows/ci.yml` runs on pushes and pull requests: repository hygiene
 (no env files or secrets tracked), backend lint + pytest, backend integration tests
 against real Postgres (ingestion, courses, skill graph, retrieval, P3A pipeline, worker),
-web lint + typecheck + unit tests + production build, extension typecheck + build +
-manifest validation + Chromium tests, database migrations + pgTAP, and the auth round trip
-against a local Supabase stack. Intelligence tests use a scripted fake model provider, so CI
-never needs a Gemini key; the real-model acceptance is a documented local gate.
+web lint + typecheck + unit tests + demo launcher tests + production build, extension typecheck +
+build + manifest validation + Chromium tests, database migrations + pgTAP, the auth round trip
+against a local Supabase stack, and the **E2E replay** job: the real API, worker, database and a
+browser, driving sign-in → capture → Activity → Skill Detail → verification → ledger on model output
+replayed from the committed Flash-Lite recording. The critical gate runs deterministically (120/120)
+and from the recording (72/72). No CI job has a Gemini key; real-model runs are documented local
+gates.

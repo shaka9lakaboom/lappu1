@@ -3,7 +3,7 @@
 This record carries live implementation status (architecture §0.1). It must never
 claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisions:
 [`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A, 0004 free-tier ModelGateway,
-0005 P3B + P4, 0006 P5, 0007 P6, 0008 P7 + P8).
+0005 P3B + P4, 0006 P5, 0007 P6, 0008 P7 + P8, 0009 P9). Demo runbook: [`demo-runbook.md`](demo-runbook.md).
 
 **Last updated:** 2026-09-26
 
@@ -34,7 +34,7 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
 | P5 merge commit | `a0e6982546c82bb4dbb1920894fb6d4711ccfa34` (PR #5, head `0f12dc7`) |
 | P6 merge commit | `4a648ac2100738a228b3506cfb21e734c6756f02` (PR #6, head `583aea4`; the PR-triggered CI on that head passed before the merge) |
-| Development branch | `skillmirror-p9-final-demo-hardening` (from `main` `01e828c`): so far only the P8 hosted smoke (script, walkthrough, records). P9 is not started. |
+| Development branch | `skillmirror-p9-final-demo-hardening` (from `main` `01e828c`): P9 — local demo integration + final hardening (ADR 0009), pushed; CI green; not merged. |
 | Previous branch | `skillmirror-p7-p8-teacher-admin-hardening` (P7 + P8, from `4a648ac`; `main` `00ff0a4` merged in, no rebase; merged in PR #8) |
 | P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
@@ -45,7 +45,108 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 
 ## Phase
 
-**Phase: P7 + P8 — Teacher/Admin + Benchmark/Hardening. P7 COMPLETE. P8 COMPLETE.** Merged in
+**Phase: P9 — Local Demo Integration + Final Hardening.** Branch `skillmirror-p9-final-demo-hardening`
+(from `main` `01e828c`), not merged. **No migration** (hosted stays at 0001–0009). Decisions:
+[ADR 0009](decisions/0009-p9-local-demo-integration.md). Runbook:
+[`demo-runbook.md`](demo-runbook.md). P7 + P8 are complete and merged (below).
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| Controlled first P8 startup sweep on hosted (snapshot → preview → run once → verify) | **PASS**: verify 10/10 | *Hosted P9* below; `scripts/sweep_p9_hosted.py` |
+| Stale READY `3aa4481e…` not shown as actionable (owner decision: skill-scoped current check; the literal rule deadlocks) | **PASS** (tests + hosted read-only) | ADR 0009 §2; `test_verification_db.py` (4 new), `test_verification_status.py`; hosted smoke R6 |
+| Learner dashboard: five questions; ids / timestamps / backend version moved to `/settings` | PASS | `dashboard.test.tsx` (source guard); CI auth round trip reads `/settings` |
+| Activity wording follows the recorded evidence (who / effect; never a bare "Evidence recorded") | PASS | `wording.test.ts`, `experience.test.tsx`; E2E replay |
+| Learning-related without skill evidence: METADATA_ONLY / STOP-low / STOP-none labelled apart | PASS | `wording.test.ts`; hosted "what is python" = STOP / low (smoke R5) |
+| Skill map readability (topic summaries, sub-skills); graph quality documented, not regenerated | PASS | `experience.test.ts`; ADR 0009 §6, §14 |
+| H10 recorded signed-in ChatGPT structure (recorder + recorded session + replay test) | **PASS (structure-from-live, re-recorded through the recorder)**; the owner's live recording: see *Owner steps* | `signed-in-recording.test.ts` (6 + 1 skipped until `recording-live.json` exists) |
+| H13 E2E CI job on the replay provider (real API + worker + DB + browser; 0 Gemini calls) | **PASS** locally (browser 18 s, verify 8/8) and in CI | `scripts/e2e_replay.py`, `e2e/p9-replay-e2e.spec.ts`, CI job *E2E replay* |
+| `/admin/benchmark`: hard gates / completion / transport failures apart from the stored verdict | **PASS** (tests + hosted browser) | `test_benchmark_view.py`, `admin.test.ts`, `test_admin_db.py`; hosted smoke R3 + admin browser |
+| Teacher / admin readiness (student refused, cohort ≥ 3, no per-student / debt leak, no prompts / outputs) | PASS | local P7 acceptance on the P9 code: prepare 4/4 · browser 3/3 · verify 16/16 · cleanup 4/4; rehearsal (student refused on `/teacher`, `/admin`, `/admin/benchmark`) |
+| Demo preflight (`demo:check`) catches :8000 taken, missing backend / web env, unbuilt extension, invalid model route; `demo:verify` read only | PASS | `scripts/demo.test.mjs` (14, now in CI), `test_demo_probe.py`; fresh rehearsal (real unbuilt-extension and port refusals) |
+| Prepared VERIFY example (disposable, labelled, engine-issued VERIFY, removable) | PASS | `scripts/demo_verify_fixture.py`; hosted prepare / rehearsal / cleanup |
+| Fresh Windows rehearsal from a clean clone | **PASS** for every automated step (timings below); the live ChatGPT capture: see *Owner steps* | *Fresh Windows rehearsal P9* |
+| Real model budget (≤ 5 generation, ≤ 3 embedding) | within budget so far: 1 generation, 0 embedding | *P9: real model calls* |
+| Existing suites + CI | PASS (8/8 jobs) | *Automated results*, *CI* |
+
+### Hosted P9 (2026-09-25 20:40 – 22:20 UTC)
+
+All from `main`-equivalent P9 code; no migration; ids only in the evidence
+(`test-results/p9-hosted/`, `test-results/demo/`, git-ignored).
+
+- **Startup sweep, once** (`sweep_p9_hosted.py`, the brief's explicit instruction): snapshot (READ ONLY)
+  → rolled-back preview (exactly the forecast of P8) → `run` at 20:54:32 UTC (`sweep_stale_ledgers`,
+  2 learners, 4 rows, 5.6 s) → verify **10/10**: only `skill_ledger` + `recommendations` changed;
+  provenance identical for `8afbd2c8…` and `97d8e181…`; 0 model runs (83 → 83); every row on
+  `ledger/p8-v1` (4 rows re-tagged, values unchanged, `ledger_version` +1); the remediated row
+  untouched (not stale); 24 NO_ACTION recommendations for `97d8e181…`, 3 updated in place for
+  `8afbd2c8…`, no VERIFY; READY `3aa4481e…` and migrations unchanged. The guard file refuses a
+  second run. The fresh demo's own startup sweep then found nothing (`learners=0`).
+- **P9 smoke** (`smoke_p9_hosted.py`): `readonly` **6/6** — migrations exactly 0001–0009; the three
+  benchmark rows unchanged; LIVE presented as hard gates PASS 13/13, 71 / 72, provider / transport
+  failure REL-06, stored FAIL; every ledger row on `ledger/p8-v1`; "what is python" recorded STOP /
+  low relevance; `3aa4481e…` NOT_NEEDED through the real `list_verifications` in a rolled-back
+  transaction (no ready check, budget untouched, nothing persisted); the whole database unchanged
+  since the sweep. `admin` 1/1 + browser (the P8 smoke's admin test with P9 assertions) +
+  `admin-cleanup` 1/1: a disposable ADMIN saw the benchmark breakdown on hosted data and was deleted
+  through the Auth cascade (its `ROLE_CHANGE` audit row stays, actor null).
+- **Demo learner** (`demo_verify_fixture.py`): prepared on hosted (0 model calls, registry unchanged):
+  *Writing if-else conditional statements*, 1 application + 2 delegations (labelled demo data), debt
+  25.82, the engine's VERIFY. The fresh rehearsal consumed it (below) and it was deleted (Auth cascade,
+  0 learner-owned rows); a **new demo learner is prepared** for the owner (credentials in
+  `test-results/demo/`, git-ignored): VERIFY active, 0 model calls.
+
+### Fresh Windows rehearsal P9 (2026-09-25 22:00–22:20 UTC; Windows 11, Node 22.14, Python 3.13)
+
+A clean clone of the pushed branch from GitHub into a new directory, following
+[`demo-runbook.md`](demo-runbook.md) from zero (env files copied from the owner's checkout; no value
+printed).
+
+| Step | Result | Time |
+| --- | --- | --- |
+| `git clone` (branch) | ok | 3.5 s |
+| `npm install` | 460 packages | 53 s |
+| `py -3.13 -m venv` + `pip install -e "services/backend[dev]"` | ok | 10 s + 68 s |
+| `npm run demo:check` before building the extension | **refused**: *the extension is not built … run npm run build:extension* | < 1 s |
+| `npm run build:extension` | Companion config api / web localhost; manifest OK | 1.6 s |
+| `npm run demo:check` | PASS | 0.9 s |
+| `npm run demo` → backend ready | worker enabled, Flash-Lite route, budget, startup sweep: nothing stale | **5.1 s** |
+| `npm run demo` → web ready (first compile of `/sign-in`) | ok | **22.6 s** |
+| `npm run demo:verify` | first run FAIL on *worker processing* (finding: the pooler hides connection names; fixed in `5ef6d5d`), then **9/9 PASS** | 2.8 s |
+| `npm run demo:check` with the demo running | **refused**: ports 8000 and 3000 in use | < 1 s |
+| Demo learner prepared (hosted) | VERIFY, 0 model calls | ~10 s |
+| First web page (warm) | ok | 0.5 s |
+| Sign in → Dashboard (*Needs your attention* shows the check) | ok | 4.2 s |
+| Skill Map | topic summaries | 2.4 s |
+| Verification Center → the worker writes ONE Flash-Lite challenge → Ready | 1 generation request (1.9 s at the provider), attempt 1 | **9.1 s** |
+| Start → answer → submit → deterministic grade → result | passed; VERIFICATION evidence; UNKNOWN → DEVELOPING, debt 25.82 → 4.80 (recently passed), VERIFY → PRACTICE | 5.9 s |
+| Student on `/teacher`, `/admin`, `/admin/benchmark` | forbidden panel | — |
+| ChatGPT live capture → sync → processing | see *Owner steps* | — |
+
+Nothing measured exceeds ~30 s live. The slowest steps are the first web page after a cold start
+(22.6 s, Next.js dev compile: open the dashboard once before presenting) and the challenge generation
+(9.1 s).
+
+### P9: real model calls
+
+| When | Generation | Embedding |
+| --- | --- | --- |
+| Fresh rehearsal: one verification challenge (`gemini-3.5-flash-lite`) | 1 | 0 |
+| Everything else (sweep, smoke, demo fixtures, E2E, tests) | 0 | 0 |
+| **Total so far** | **1** (target ≤ 5) | **0** (target ≤ 3) |
+
+### Owner steps (the only parts that need the owner's browser)
+
+1. **Live signed-in capture** (exit gate): with `npm run demo` running, load `apps\extension\dist`
+   unpacked, sign in to the Companion, open a **new** signed-in ChatGPT conversation, ask one course
+   question; Activity must show the turn with *Demonstrated by* matching the recorded evidence.
+2. **Live structure recording** (optional, closes H10 fully): paste
+   `apps/extension/scripts/record-chatgpt-structure.js` into DevTools on that conversation,
+   `skillmirrorRecorder.start()`, chat with synthetic content, `copy(skillmirrorRecorder.stop())`,
+   save as `apps/extension/tests/fixtures/chatgpt/signed-in/recording-live.json`.
+
+### Previous phase: P7 + P8 (merged in PR #8, `01e828c`)
+
+**P7 + P8 — Teacher/Admin + Benchmark/Hardening. P7 COMPLETE. P8 COMPLETE.** Merged in
 PR #8 as `main` `01e828c`. Hosted has **0001–0009** (P7 is migration `0009_teacher_admin_ops.sql`;
 P8 needs no migration of its own, its storage `benchmark_runs` is part of 0009). Decisions:
 [ADR 0008](decisions/0008-p7-p8-teacher-admin-hardening.md). **Next phase: P9 — Local Demo
@@ -62,9 +163,9 @@ Integration + Final Hardening, not started.**
   8/8, read-only: false delegations 2 → 1, debt 30.1433 → 0, the false VERIFY superseded,
   activity actor = evidence actor, 0 model runs and 0 registry / evidence rows created (see
   *Hosted E2E smoke P8*).
-- **P9 UX cleanup item:** the historical READY check `3aa4481e…` of that learner still shows in
-  the verification centre, although its VERIFY is superseded (no rule closes a READY session;
-  it was left untouched on purpose).
+- **P9 UX cleanup item — resolved in P9:** the historical READY check `3aa4481e…` stays READY in
+  the data but reads NOT_NEEDED (history) since its skill has no ACTIVE VERIFY / REVERIFY
+  (ADR 0009 §2; hosted smoke R6).
 
 ```
 GET /v1/me · GET /v1/teacher/courses[/{id}/overview]   (profile role from the database)
@@ -1147,7 +1248,7 @@ is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 R
 
 | Item | Value |
 | --- | --- |
-| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}`; P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections); P6: `/verifications` (Verification Center), `/verifications/{id}` (challenge, result); **P7: `/teacher`, `/teacher/courses/{id}`, `/admin`, `/admin/jobs`, `/admin/model-runs`, `/admin/skill-candidates`, `/admin/benchmark`**) |
+| Web | http://localhost:3000 (P9: `/settings` — Settings & diagnostics; `/courses`, `/courses/new`, `/courses/{id}`; P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections); P6: `/verifications` (Verification Center), `/verifications/{id}` (challenge, result); **P7: `/teacher`, `/teacher/courses/{id}`, `/admin`, `/admin/jobs`, `/admin/model-runs`, `/admin/skill-candidates`, `/admin/benchmark`**) |
 | API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, `GET /v1/ledger[?course_id=]` (P4, + `debt_band`), P5: `GET /v1/skills/{id}`, `GET /v1/activity`, `POST /v1/feedback` (Idempotency-Key), `GET /v1/recommendations`; **P6: `GET /v1/verifications` (plans, no model call), `GET /v1/verifications/{id}`, `POST /v1/verifications/{id}/start`, `POST /v1/verifications/{id}/submit` (Idempotency-Key), `POST /v1/verifications/{id}/abandon`**; **P7: `GET /v1/me`, `GET /v1/teacher/courses`, `GET /v1/teacher/courses/{id}/overview`, `/v1/admin/{overview, jobs[/{id}], jobs/{id}/retry, model-runs, skill-candidates, skill-candidates/{id}/review, benchmark[/{id}], courses[/{id}], courses/{id}/members, skills[/{id}]}`**; OpenAPI `/docs` |
 | Worker | in the API process when `DATABASE_URL` + `GEMINI_API_KEY` are set; or `python -m app.jobs.worker [--once]` |
 | Deployed web / API | none, by decision (local-first) |
@@ -1158,16 +1259,19 @@ is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 R
 
 | Suite | Local | CI job |
 | --- | --- | --- |
+| **P9:** replay E2E (real API + worker + DB + browser, replayed model) | **PASS**: browser 1 passed (18 s), `e2e_replay.py verify` 8/8 | E2E replay |
+| **P9:** demo launcher (`node --test scripts/demo.test.mjs`) | **14 passed** | Web |
+| **P9:** local P7 acceptance on the P9 code | prepare 4/4 · browser 3/3 · verify 16/16 · cleanup 4/4 | not in CI by design |
 | Backend `ruff check` + `ruff format --check` (incl. benchmark runner) | clean | Backend |
-| Backend pytest, unit (no DB) | **874 passed, 172 skipped** (P7: 817 / 152) | Backend |
-| Backend pytest, with local Postgres (0001–0009) | **1046 passed**, incl. the critical gate deterministic 120/120 and replay 72/72 (P7: 969) | Backend ingestion + intelligence + database |
+| Backend pytest, unit (no DB) | **908 passed, 177 skipped** (P8: 874 / 172) | Backend |
+| Backend pytest, with local Postgres (0001–0009) | **1085 passed**, incl. the critical gate deterministic 120/120 and replay 72/72 (P8: 1046) | Backend ingestion + intelligence + database |
 | Database pgTAP (0001–0009) | **363 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49 + 79 + 75) | Database |
 | P3B/P4 safety benchmark (`benchmark/runners/p3b_p4_safety.py`, 22 deterministic cases) | **22/22**; False AI Assistance Debt Rate **0/21**; debt recall 2/2 | Backend (`test_benchmark_safety.py`) |
 | Web ESLint | 0 problems | Web |
 | Typecheck (web, contracts, config, ui, extension) | 5/5 clean | Web, Extension |
-| Web vitest | **106 passed** (P7: 96) | Web |
+| Web vitest | **128 passed** (P8: 106) | Web |
 | Web production build (no env) | pass | Web |
-| Extension vitest | **100 passed** (P7: 86) | Extension |
+| Extension vitest | **106 passed, 1 skipped** (the owner's live recording; P8: 100) | Extension |
 | Extension build + manifest validation + Chromium (load ×2, capture → queue → sync, active-course picker) | pass, **4 passed** | Extension |
 | Local P7 acceptance (no model call) | **PASS**: prepare 4/4, browser 3/3, verify 16/16, cleanup 3/3 | not in CI by design |
 | Local P6 acceptance (scripted fake provider) | **PASS**: 15/15 + browser walkthrough (1 passed); 0 real model calls | not in CI by design |
@@ -1190,6 +1294,10 @@ Earlier: `test_model_gateway` (27), `test_skill_graph_unit`, `test_retrieval_sco
 `test_retrieval_db`, `test_pipeline_db`, `test_worker_db`, `test_contract_parity`, `test_benchmark_smoke`.
 
 ## CI
+
+P9: the branch pushes run all **8** jobs (the 7 existing + the new **E2E replay**); the first push
+(`b967a9e`, run [36193451938](https://github.com/shaka9lakaboom/lappu1/actions/runs/36193451938))
+completed with success on every job (E2E replay 181 s). No job has a Gemini key.
 
 P7 + P8 (PR #8): the PR run on head `f476bf0`
 ([36177071898](https://github.com/shaka9lakaboom/lappu1/actions/runs/36177071898)) and the `main`
@@ -1343,27 +1451,17 @@ auth round trip.
 
 ## Exact next action
 
-**P7 COMPLETE. P8 COMPLETE.** Merged (`main` `01e828c`); hosted has 0001–0009; the hosted E2E
-smoke passed; the three benchmark runs are recorded; the hosted remediation of the 2026-09-25 row
-is COMPLETE (`affected` 8/8). Do not run `recompute_skill.py --apply` for that row again.
-**P9 — Local Demo Integration + Final Hardening is not started.** Its branch
-`skillmirror-p9-final-demo-hardening` (from `main` `01e828c`) holds only the smoke script, the
-smoke walkthrough and these records so far.
+**P9 — Local Demo Integration + Final Hardening: implemented and verified, except the owner's live
+signed-in capture.** Branch `skillmirror-p9-final-demo-hardening` (pushed; CI green). Hosted: 0001–0009,
+no migration; the one-time startup sweep is done (never re-run `sweep_p9_hosted.py run`, nor the P8
+`recompute_skill.py --apply`).
 
-1. **P9 starts in its own session.** Carried into P9:
-   - **UX cleanup: the historical READY check `3aa4481e…`** (learner `8afbd2c8…`, "Writing for loops
-     over ranges"). It stays READY while its VERIFY `e8d6092f…` is superseded. Decide how the
-     verification centre shows (or lets the learner dismiss) a check whose reason is gone. Until
-     then nothing changes the session.
-   - The first `npm run demo` on `main` sweeps: it re-tags 3 rows of `8afbd2c8…` and the real
-     P3B/P4 learner's one row, and inserts 24 NO_ACTION recommendations for the real learner
-     (previewed, rolled back; no model call).
-   - The E2E CI job on the replay provider (H13); `skill-attribution/v3` for Flash-Lite's false
-     credit of questions (ADR 0008 §35).
-2. **Run the demo only from `main`.** The old `lappu1-demo-hotfix` checkout (`00ff0a4`, `ledger/p6-v1`)
-   would re-derive a row with the old algorithm on that skill's next evidence.
-3. **Owner approvals still open:**
-   - `RESUME_ATTRIBUTION` for the pre-0005 hosted turns (K7, ≤ 2 requests)
-   - the recorded signed-in ChatGPT fixture and the `SIGNED_IN=1` live check (H10: needs the owner
-     signed in)
-   - the `gemini-3.7-flash` canary was skipped by the owner (not planned)
+1. **Owner:** the live signed-in ChatGPT capture on the running demo (*Owner steps* above); optionally
+   the live structure recording (`recording-live.json`).
+2. Then: record the capture / sync / processing timings here, open the P9 pull request into `main`
+   (the agent does not merge).
+3. Before the judge demo: `demo_verify_fixture.py status` (VERIFY active; re-`prepare` after
+   `cleanup` if it was used), open the dashboard once after `npm run demo` (cold compile), and follow
+   `demo-runbook.md` §14.
+4. Post-hackathon: graph-quality calibration, `skill-attribution/v3`, a READY → closed transition
+   (migration 0010, owner approval), code / SQL graders, the 3.7 live validation.
