@@ -14,8 +14,11 @@
 --   evidence is written: an UNKNOWN actor, a low-confidence attribution, an undetermined
 --   outcome or an ungrounded learner span abstain (no row). EXPOSURE and OBSERVATION carry
 --   strength 0 and no outcome, enforced here as well as in the backend.
--- * Only captured AI activity produces evidence in P3B. VERIFICATION / ASSESSMENT /
---   TEACHER sources arrive with their own migrations (P6/P7).
+-- * Sources (§10.1): AI_ACTIVITY | VERIFICATION | ASSESSMENT | TEACHER are all structurally
+--   possible. P3B writes AI_ACTIVITY only, and AI_ACTIVITY evidence must be an attribution of
+--   an ACCEPTED mapping (guard trigger). The other sources (P6 verification, P7 teacher /
+--   assessment) carry no attribution or mapping provenance: source_id names their own
+--   record, and (source_type, source_id, skill_id) is unique for every source (replay-safe).
 --
 -- Only the backend writes. Learners may SELECT their own rows; clients can never
 -- create or modify evidence. Mastery, the ledger and debt are P4 (migration 0006).
@@ -126,7 +129,8 @@ create table public.evidence_events (
     learner_id             uuid not null references public.profiles (id) on delete cascade,
     skill_id               uuid not null references public.skill_nodes (id),
     source_type            public.evidence_source_type not null,
-    -- For AI_ACTIVITY: the attribution id.
+    -- The producing record: the attribution (AI_ACTIVITY), the verification result (P6),
+    -- the assessment or teacher record (P7).
     source_id              uuid not null,
     -- Provenance to captured activity (AI_ACTIVITY). One evidence event per attribution.
     attribution_id         uuid unique references public.attributions (id) on delete cascade,
@@ -148,6 +152,8 @@ create table public.evidence_events (
     strength               double precision not null check (strength >= 0),
     mapping_confidence     real not null check (mapping_confidence between 0 and 1),
     attribution_confidence real not null check (attribution_confidence between 0 and 1),
+    -- B.2: set only when a grader scored the evidence (P6); never for captured AI activity.
+    grading_confidence     real check (grading_confidence is null or grading_confidence between 0 and 1),
     evidence_confidence    real not null check (evidence_confidence between 0 and 1),
     -- {"student": ..., "ai": ..., "mapping": ...}: the exact supporting spans.
     evidence_span          jsonb not null check (jsonb_typeof(evidence_span) = 'object'),
@@ -165,15 +171,29 @@ create table public.evidence_events (
     excluded_at            timestamptz,
     processing_job_id      uuid,
     created_at             timestamptz not null default now(),
-    -- P3B writes evidence from captured AI activity only (P6/P7 relax this with their sources).
-    constraint evidence_events_source_p3b check (source_type = 'AI_ACTIVITY'),
+    -- Replay-safe for every source: one event per source record and skill.
+    constraint evidence_events_source_key unique (source_type, source_id, skill_id),
+    -- Captured AI activity: always an attribution of an ACCEPTED mapping (guard trigger), the
+    -- full chain back to the raw messages, only the types a model may propose, and no grade.
     constraint evidence_events_ai_activity_shape check (
         source_type <> 'AI_ACTIVITY'
         or (attribution_id is not null and source_id = attribution_id and mapping_id is not null
             and decision_id is not null and segment_id is not null
-            and cardinality(raw_message_ids) between 1 and 2
+            and cardinality(raw_message_ids) between 1 and 2 and grading_confidence is null
             and evidence_type in ('EXPOSURE', 'OBSERVATION', 'ASSISTED_ATTEMPT',
                                   'INDEPENDENT_EXPLANATION', 'INDEPENDENT_APPLICATION', 'TRANSFER'))),
+    -- Verification / assessment / teacher evidence is not captured activity: it never claims
+    -- an attribution, mapping, segment or raw message.
+    constraint evidence_events_other_source_shape check (
+        source_type = 'AI_ACTIVITY'
+        or (attribution_id is null and mapping_id is null and decision_id is null
+            and segment_id is null and cardinality(raw_message_ids) = 0)),
+    -- Only a SkillMirror verification is VERIFICATION evidence (§9.6); only a teacher or an
+    -- external assessment is TEACHER_EVIDENCE.
+    constraint evidence_events_verification_source check (
+        evidence_type <> 'VERIFICATION' or source_type = 'VERIFICATION'),
+    constraint evidence_events_teacher_source check (
+        evidence_type <> 'TEACHER_EVIDENCE' or source_type in ('TEACHER', 'ASSESSMENT')),
     -- Uncertain attribution never creates evidence (§2.2 "uncertainty causes abstention").
     constraint evidence_events_actor_known check (actor <> 'UNKNOWN'),
     -- Exposure is not mastery: EXPOSURE / OBSERVATION never carry strength or an outcome.
@@ -191,8 +211,9 @@ create table public.evidence_events (
         or (outcome_signal = 'CORRECT' and outcome = 1)
         or (outcome_signal = 'INCORRECT' and outcome = 0)
         or (outcome_signal = 'PARTIAL' and outcome > 0 and outcome < 1)),
+    -- B.2: min(mapping, attribution, grading if any); least() ignores a null grading.
     constraint evidence_events_confidence check (
-        evidence_confidence = least(mapping_confidence, attribution_confidence)),
+        evidence_confidence = least(mapping_confidence, attribution_confidence, grading_confidence)),
     constraint evidence_events_exclusion_shape check (
         (excluded and exclusion_reason is not null and excluded_at is not null)
         or (not excluded and exclusion_reason is null and excluded_at is null))
@@ -205,6 +226,7 @@ create index evidence_events_learner_skill_idx on public.evidence_events (learne
 create index evidence_events_segment_idx on public.evidence_events (segment_id);
 
 -- Evidence from captured AI activity must match its attribution, mapping and segment exactly.
+-- Other sources are shaped by the checks above; their own guards arrive with their tables.
 create function public.evidence_events_guard()
 returns trigger
 language plpgsql
@@ -217,6 +239,9 @@ declare
 begin
     if new.source_type <> 'AI_ACTIVITY' then
         return new;
+    end if;
+    if new.attribution_id is null then
+        raise exception 'AI_ACTIVITY evidence requires an attribution' using errcode = '23514';
     end if;
     select at.learner_id, at.skill_id, at.mapping_id, at.decision_id, at.segment_id, at.status,
            at.actor, at.confidence

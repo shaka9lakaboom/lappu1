@@ -156,6 +156,9 @@ export interface EvidenceEvent {
   strength: number;
   mapping_confidence: number;
   attribution_confidence: number;
+  /** Set only for graded evidence (P6 verification); null for captured AI activity. */
+  grading_confidence: number | null;
+  /** min(mapping, attribution, grading if any) - Appendix B.2. */
   evidence_confidence: number;
   evidence_span: Record<string, string | null>;
   model_run_ids: string[];

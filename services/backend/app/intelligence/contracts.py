@@ -175,6 +175,8 @@ class EvidenceEvent(BaseModel):
     strength: float = Field(ge=0)
     mapping_confidence: float = Field(ge=0, le=1)
     attribution_confidence: float = Field(ge=0, le=1)
+    # Set only for graded evidence (P6 verification); None for captured AI activity.
+    grading_confidence: float | None = Field(ge=0, le=1)
     evidence_confidence: float = Field(ge=0, le=1)
     evidence_span: dict[str, str | None]
     model_run_ids: tuple[UUID, ...]

@@ -3,7 +3,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(31);
+select plan(40);
 
 -- Fixtures, written as the table owner (the way the backend writes) -------
 insert into auth.users (id, email)
@@ -99,23 +99,43 @@ create function pg_temp.evidence(
     p_type text default 'INDEPENDENT_EXPLANATION', p_actor text default 'STUDENT',
     p_signal text default 'CORRECT', p_outcome float8 default 1, p_strength float8 default 0.54,
     p_source text default 'AI_ACTIVITY', p_mapping_confidence real default 0.91,
-    p_evidence_confidence real default 0.9,
+    p_evidence_confidence real default 0.9, p_grading real default null,
     p_raw uuid[] default array['52000000-0000-4000-8000-0000000000a1', '52000000-0000-4000-8000-0000000000a2']::uuid[])
 returns void language sql as $$
     insert into public.evidence_events (
         learner_id, skill_id, source_type, source_id, attribution_id, mapping_id, decision_id, segment_id,
         raw_message_ids, evidence_type, actor, outcome_signal, outcome, difficulty, difficulty_multiplier,
-        independence, base_weight, strength, mapping_confidence, attribution_confidence, evidence_confidence,
-        evidence_span, model_run_ids, qualification_reason, qualifier_version, policy_snapshot, occurred_at)
+        independence, base_weight, strength, mapping_confidence, attribution_confidence, grading_confidence,
+        evidence_confidence, evidence_span, model_run_ids, qualification_reason, qualifier_version,
+        policy_snapshot, occurred_at)
     values ('00000000-0000-4000-8000-0000000005a1', '50000000-0000-4000-8000-000000000001',
             p_source::public.evidence_source_type, '57000000-0000-4000-8000-000000000001',
             '57000000-0000-4000-8000-000000000001', '56000000-0000-4000-8000-000000000001',
             '55000000-0000-4000-8000-000000000001', '54000000-0000-4000-8000-000000000001', p_raw,
             p_type::public.evidence_type, p_actor::public.evidence_actor, p_signal::public.outcome_signal,
-            p_outcome, 0.5, 1.0, 0.8, 0.75, p_strength, p_mapping_confidence, 0.9, p_evidence_confidence,
+            p_outcome, 0.5, 1.0, 0.8, 0.75, p_strength, p_mapping_confidence, 0.9, p_grading,
+            p_evidence_confidence,
             '{"student": "so LEFT JOIN orders", "ai": null, "mapping": "so LEFT JOIN orders"}'::jsonb,
             array['53000000-0000-4000-8000-000000000001', '53000000-0000-4000-8000-000000000002']::uuid[],
             'QUALIFIED', 'evidence/p3b-v1', '{}'::jsonb, now());
+$$;
+
+-- Evidence from a non-activity source (P6 verification, P7 teacher / assessment).
+create function pg_temp.other_evidence(
+    p_source text, p_type text, p_source_id uuid,
+    p_attribution uuid default null, p_raw uuid[] default '{}',
+    p_grading real default 0.85, p_evidence_confidence real default 0.85)
+returns void language sql as $$
+    insert into public.evidence_events (
+        learner_id, skill_id, source_type, source_id, attribution_id, raw_message_ids, evidence_type,
+        actor, outcome_signal, outcome, difficulty, difficulty_multiplier, independence, base_weight,
+        strength, mapping_confidence, attribution_confidence, grading_confidence, evidence_confidence,
+        evidence_span, model_run_ids, qualification_reason, qualifier_version, policy_snapshot, occurred_at)
+    values ('00000000-0000-4000-8000-0000000005a1', '50000000-0000-4000-8000-000000000001',
+            p_source::public.evidence_source_type, p_source_id, p_attribution, p_raw,
+            p_type::public.evidence_type, 'STUDENT', 'CORRECT', 1, 0.5, 1.0, 1.0, 1.5, 1.275,
+            1.0, 1.0, p_grading, p_evidence_confidence, '{"response": "graded answer"}'::jsonb,
+            '{}'::uuid[], 'GRADED', 'verification/test-v1', '{}'::jsonb, now());
 $$;
 
 -- Schema ------------------------------------------------------------------
@@ -194,8 +214,49 @@ select throws_ok(
     $$ select pg_temp.evidence(p_actor => 'UNKNOWN') $$,
     '23514', null, 'an UNKNOWN actor never creates evidence');
 select throws_ok(
-    $$ select pg_temp.evidence(p_source => 'VERIFICATION') $$,
-    '23514', null, 'only captured AI activity produces evidence before P6/P7');
+    $$ select pg_temp.evidence(p_type => 'VERIFICATION') $$,
+    '23514', null, 'captured AI activity is never VERIFICATION evidence');
+select throws_ok(
+    $$ insert into public.evidence_events (
+           learner_id, skill_id, source_type, source_id, raw_message_ids, evidence_type, actor, outcome_signal,
+           outcome, difficulty, difficulty_multiplier, independence, base_weight, strength, mapping_confidence,
+           attribution_confidence, evidence_confidence, evidence_span, qualification_reason, qualifier_version,
+           policy_snapshot, occurred_at)
+       values ('00000000-0000-4000-8000-0000000005a1', '50000000-0000-4000-8000-000000000001', 'AI_ACTIVITY',
+               gen_random_uuid(), array['52000000-0000-4000-8000-0000000000a1']::uuid[], 'INDEPENDENT_APPLICATION',
+               'STUDENT', 'CORRECT', 1, 0.5, 1.0, 1.0, 1.0, 0.9, 0.9, 0.9, 0.9, '{}'::jsonb, 'QUALIFIED',
+               'evidence/p3b-v1', '{}'::jsonb, now()) $$,
+    '23514', null, 'AI_ACTIVITY evidence always needs an attribution');
+select throws_ok(
+    $$ select pg_temp.evidence(p_grading => 0.85, p_evidence_confidence => 0.85) $$,
+    '23514', null, 'captured AI activity carries no grading confidence');
+
+-- Future sources stay structurally possible, without an attribution ---
+select lives_ok(
+    $$ select pg_temp.other_evidence('VERIFICATION', 'VERIFICATION', '58000000-0000-4000-8000-000000000001') $$,
+    'P6 VERIFICATION evidence can be written without an attribution row');
+select throws_ok(
+    $$ select pg_temp.other_evidence('VERIFICATION', 'VERIFICATION', '58000000-0000-4000-8000-000000000001') $$,
+    '23505', null, 'every source is replay-safe: one event per source record and skill');
+select lives_ok(
+    $$ select pg_temp.other_evidence('TEACHER', 'TEACHER_EVIDENCE', '58000000-0000-4000-8000-000000000002',
+                                     p_grading => null, p_evidence_confidence => 1.0) $$,
+    'P7 TEACHER evidence can be written');
+select throws_ok(
+    $$ select pg_temp.other_evidence('VERIFICATION', 'VERIFICATION', '58000000-0000-4000-8000-000000000003',
+                                     p_attribution => '57000000-0000-4000-8000-000000000001') $$,
+    '23514', null, 'non-activity evidence never claims an attribution');
+select throws_ok(
+    $$ select pg_temp.other_evidence('VERIFICATION', 'VERIFICATION', '58000000-0000-4000-8000-000000000004',
+                                     p_raw => array['52000000-0000-4000-8000-0000000000a1']::uuid[]) $$,
+    '23514', null, 'non-activity evidence never claims captured raw messages');
+select throws_ok(
+    $$ select pg_temp.other_evidence('TEACHER', 'VERIFICATION', '58000000-0000-4000-8000-000000000005') $$,
+    '23514', null, 'only a SkillMirror verification is VERIFICATION evidence');
+select throws_ok(
+    $$ select pg_temp.other_evidence('VERIFICATION', 'VERIFICATION', '58000000-0000-4000-8000-000000000006',
+                                     p_evidence_confidence => 1.0) $$,
+    '23514', null, 'graded evidence confidence is min(mapping, attribution, grading)');
 select throws_ok(
     $$ select pg_temp.evidence(p_signal => 'CORRECT', p_outcome => 0.5) $$,
     '23514', null, 'the outcome matches the outcome signal');
@@ -230,7 +291,7 @@ set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-4000-8000-0000000005a1", "role": "authenticated"}';
 select is(
     (select count(*)::int from public.evidence_events) + (select count(*)::int from public.attributions),
-    2, 'a learner reads their own attribution and evidence');
+    4, 'a learner reads their own attribution and evidence (activity, verification, teacher)');
 select throws_ok(
     $$ insert into public.evidence_events (learner_id, skill_id) values
          ('00000000-0000-4000-8000-0000000005a1', '50000000-0000-4000-8000-000000000001') $$,

@@ -24,8 +24,9 @@ UNKNOWN whatever the mean looks like (§2.2 "unknown is not weak"):
     DEVELOPING            otherwise
 
 VERIFIED and NEEDS_REVERIFICATION need evidence from a SkillMirror verification
-source. None exists before P6 (VERIFICATION_SOURCES is empty, and migration 0005
-admits AI_ACTIVITY evidence only), so both states are unreachable in P4.
+source. Before P6 no source counts as one (VERIFICATION_SOURCES is empty, so even a
+VERIFICATION evidence row cannot verify), nothing writes such evidence, and migration
+0006 refuses both states in skill_ledger: they are unreachable in P4.
 """
 
 import math

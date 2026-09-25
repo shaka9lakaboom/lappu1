@@ -35,18 +35,31 @@
      learner and skill exactly. Append-only.
 3. **`evidence_events`** (§10.1 contract, plus provenance).
    - Fields: attribution, mapping, decision and segment ids, `raw_message_ids`,
-     `outcome_signal`, `base_weight`, `difficulty_multiplier`, `qualification_reason`,
-     `qualifier_version`, the policy snapshot, `occurred_at`, and a one-way exclusion.
-   - A trigger re-checks the provenance: the attribution is ATTRIBUTED and not UNKNOWN; the
-     ids, confidences and raw message ids match.
-   - Checks:
+     `outcome_signal`, `base_weight`, `difficulty_multiplier`, `grading_confidence` (B.2),
+     `qualification_reason`, `qualifier_version`, the policy snapshot, `occurred_at`, and a
+     one-way exclusion.
+   - **Every §10.1 source stays structurally possible**: `AI_ACTIVITY | VERIFICATION |
+     ASSESSMENT | TEACHER`. P3B writes `AI_ACTIVITY` only, and P6 can insert VERIFICATION
+     evidence without a schema change.
+     - **`AI_ACTIVITY`** must be an attribution of an ACCEPTED mapping. A trigger re-checks
+       the provenance: the attribution exists, is ATTRIBUTED and not UNKNOWN, and the ids,
+       confidences and raw message ids match. The row carries the full chain to 1–2 raw
+       messages, uses only the model-proposable types, and has no grading confidence.
+     - **Other sources** are not captured activity: they never claim an attribution,
+       mapping, decision, segment or raw message. Their `source_id` names their own record
+       (verification result, assessment, teacher note). Their guards arrive with their
+       tables in P6/P7.
+     - VERIFICATION evidence needs the VERIFICATION source (§9.6: a SkillMirror-controlled
+       challenge). TEACHER_EVIDENCE needs a TEACHER or ASSESSMENT source.
+   - Checks for **every** source:
      - EXPOSURE / OBSERVATION ⇒ strength 0, no outcome.
      - An AI actor ⇒ EXPOSURE / OBSERVATION.
      - The actor is never UNKNOWN.
      - The outcome matches the signal.
-     - `evidence_confidence = least(mapping, attribution)`.
-   - **Only `AI_ACTIVITY` evidence is allowed** until P6/P7 add their sources.
-   - The `attribution_id` is unique, so a replay cannot duplicate evidence.
+     - `evidence_confidence = least(mapping, attribution, grading)`. `least` ignores a null
+       grading, so this is B.2's min(…, grading confidence if any).
+   - **Replay-safe for every source**: `(source_type, source_id, skill_id)` is unique; for
+     captured activity, `attribution_id` is unique too.
    - Append-only, except the one-way exclusion (P7 "don't count this": `excluded`
      false → true with a reason and a time; nothing else may change).
 4. **`skill_ledger`** (§7.1 plus `debt_eligible`, `debt_components`, counts,
@@ -201,15 +214,17 @@
     6. DEVELOPING: otherwise, including mean ≥ 0.70 without DEMONSTRATED's gates. §10.3 lists
        DEVELOPING as 0.45–0.70; the architecture does not name a state for a high mean that
        lacks the other gates, and DEVELOPING is the conservative choice.
-19. **VERIFIED and NEEDS_REVERIFICATION are structurally unreachable before P6**, at three
-    layers:
-    - `VERIFICATION_SOURCES` is empty in the engine, so no record counts as a SkillMirror
-      verification.
-    - The database admits only `AI_ACTIVITY` evidence.
-    - `skill_ledger` refuses both states.
+19. **VERIFIED and NEEDS_REVERIFICATION are structurally unreachable before P6**, although
+    VERIFICATION evidence rows are possible in the schema:
+    - `VERIFICATION_SOURCES` is empty in the engine, so no record, not even a VERIFICATION
+      row, counts as a SkillMirror verification.
+    - No P3B/P4 code path writes non-`AI_ACTIVITY` evidence. The evidence stage hard-codes
+      the source.
+    - `skill_ledger` refuses both states (a check in migration 0006).
 
-    P6 relaxes all three with its verification system. Tests feed random evidence, including
-    records that claim a verification source, and never reach them.
+    P6 enables them with its verification system: it adds the source to
+    `VERIFICATION_SOURCES` and drops the ledger check. Tests feed random evidence, including
+    rows that claim a VERIFICATION source, and never reach either state.
 
 ## AI Assistance Debt (§10.4)
 
