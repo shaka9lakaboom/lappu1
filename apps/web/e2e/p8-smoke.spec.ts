@@ -28,7 +28,15 @@ interface Chip {
 
 const env = (name: string) => process.env[name];
 const out = env('P8_SMOKE_OUT') ?? join(__dirname, '..', '..', '..', 'test-results', 'p8-hosted');
-const ACTOR = { STUDENT: 'You', AI: 'AI', SHARED: 'You + AI', UNKNOWN: 'Unclear' } as const;
+// P9: the chip's "who" follows the recorded evidence type (never the attributor's claim).
+const WHO: Record<string, string> = {
+  EXPOSURE: 'Explanation seen',
+  OBSERVATION: 'Demonstrated by: AI',
+  ASSISTED_ATTEMPT: 'Demonstrated by: You + AI',
+  INDEPENDENT_EXPLANATION: 'Demonstrated by: You',
+  INDEPENDENT_APPLICATION: 'Demonstrated by: You',
+  TRANSFER: 'Demonstrated by: You',
+};
 const TYPE: Record<string, string> = {
   EXPOSURE: 'Saw an explanation',
   OBSERVATION: 'The AI did it',
@@ -64,7 +72,7 @@ test('learner: activity chips equal the recorded evidence; no VERIFY, nothing pl
   await expect(page.getByTestId('activity-row').first()).toBeVisible();
   for (const chip of e.chips) {
     const row = page.locator(`[data-testid="skill-chip"][data-mapping-id="${chip.mapping_id}"]`);
-    await expect(row).toContainText(`Actor: ${ACTOR[chip.actor]}`);
+    await expect(row.getByTestId('chip-who')).toHaveText(WHO[chip.evidence_type]);
     await expect(row.getByTestId('chip-evidence-type')).toContainText(TYPE[chip.evidence_type]);
     await expect(row.getByTestId('chip-qualification')).toHaveCount(chip.qualification_reason === 'COPIED_FROM_AI' ? 1 : 0);
   }

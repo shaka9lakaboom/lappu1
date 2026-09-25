@@ -6,14 +6,17 @@ import { ToneBadge } from '@/components/experience/badges';
 import { CorrectionButton } from '@/components/experience/correction-button';
 import { processingLabel, providerLabel, shortId, shortPreview } from '@/lib/activity';
 import {
-  ACTOR_LABEL,
+  EVIDENCE_KIND,
   EVIDENCE_TYPE_LABEL,
+  WHO_QUESTION,
+  evidenceKind,
   exclusionLabel,
   formatTime,
   percent,
-  processingOutcomeLabel,
   qualificationNote,
   segmentOutcomeLabel,
+  turnOutcomeLabel,
+  whoLabel,
 } from '@/lib/experience';
 
 type Submit = (state: FeedbackFormState, formData: FormData) => Promise<FeedbackFormState>;
@@ -43,16 +46,26 @@ function Segment({ segment, returnTo, submit }: { segment: ActivitySegment; retu
                 {m.canonical_name}
               </Link>
               <span className="text-xs text-muted-foreground">match {percent(m.confidence)}</span>
-              {m.actor ? <ToneBadge tone="neutral">Actor: {ACTOR_LABEL[m.actor]}</ToneBadge> : null}
               {m.evidence_type ? (
-                <span className="text-xs text-muted-foreground" data-testid="chip-evidence-type">
-                  {EVIDENCE_TYPE_LABEL[m.evidence_type]}
-                  {qualificationNote(m.qualification_reason) ? (
-                    <span data-testid="chip-qualification"> · {qualificationNote(m.qualification_reason)}</span>
-                  ) : null}
-                </span>
+                <>
+                  {/* Who / what / effect all follow the RECORDED evidence (after qualification). */}
+                  <span title={WHO_QUESTION} className="inline-flex" data-testid="chip-who">
+                    <ToneBadge tone="neutral">{whoLabel(m.evidence_type)}</ToneBadge>
+                  </span>
+                  <span className="text-xs text-muted-foreground" data-testid="chip-evidence-type">
+                    {EVIDENCE_TYPE_LABEL[m.evidence_type]}
+                    {qualificationNote(m.qualification_reason) ? (
+                      <span data-testid="chip-qualification"> · {qualificationNote(m.qualification_reason)}</span>
+                    ) : null}
+                  </span>
+                  {m.excluded || m.correction ? null : (
+                    <span className="text-xs" data-testid="chip-effect" data-kind={evidenceKind(m.evidence_type)}>
+                      {EVIDENCE_KIND[evidenceKind(m.evidence_type)].effect}
+                    </span>
+                  )}
+                </>
               ) : m.attribution_status ? (
-                <span className="text-xs text-muted-foreground">No evidence qualified</span>
+                <span className="text-xs text-muted-foreground">No skill evidence (who did what was unclear)</span>
               ) : (
                 <span className="text-xs text-muted-foreground">Attribution pending</span>
               )}
@@ -85,10 +98,13 @@ function Segment({ segment, returnTo, submit }: { segment: ActivitySegment; retu
 
 /** Captured messages with what SkillMirror derived from them. Captured text renders as plain text. */
 export function ActivityList({ rows, returnTo, submit }: { rows: ActivityRow[]; returnTo: string; submit: Submit }) {
+  // A turn's task units live on its anchor message; its other message reads them from there.
+  const segmentsOf = new Map(rows.filter((r) => r.segments.length > 0).map((r) => [r.id, r.segments]));
   return (
     <ol className="divide-y" data-testid="activity-table">
       {rows.map((row) => {
-        const outcome = processingOutcomeLabel(row.processing_outcome);
+        const turn = row.segments.length > 0 ? row.segments : (segmentsOf.get(row.analyzed_in ?? '') ?? null);
+        const outcome = turnOutcomeLabel(row.processing_outcome, turn);
         return (
           <li key={row.id} id={`activity-${row.id}`} className="grid gap-2 py-3 sm:grid-cols-[11rem_1fr]" data-testid="activity-row" data-message-id={row.id}>
             <div className="space-y-0.5 text-xs">

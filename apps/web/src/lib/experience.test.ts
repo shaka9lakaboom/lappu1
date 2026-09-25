@@ -163,7 +163,7 @@ describe('activity and evidence labels', () => {
       'No confident skill match (no evidence)',
     );
     expect(segmentOutcomeLabel({ ...segment, route: 'STOP' })).toBe('Not learning activity (ignored)');
-    expect(processingOutcomeLabel('EVIDENCE_RECORDED')).toBe('Evidence recorded');
+    expect(processingOutcomeLabel('EVIDENCE_RECORDED')).toBe('Analysed — see the matched skills for what counts');
     expect(processingOutcomeLabel(null)).toBeNull();
     expect(exclusionLabel('LEARNER_WRONG_SKILL')).toBe('You marked this as the wrong skill');
     expect(exclusionLabel('LEARNER_DONT_COUNT')).toBe('You chose not to count this');

@@ -234,6 +234,54 @@ export const EVIDENCE_TYPE_LABEL: Record<EvidenceType, string> = {
   TEACHER_EVIDENCE: 'Teacher assessment',
 };
 
+// --- What a recorded evidence means for the learner (P9) ------------------------------------------
+//
+// Derived ONLY from the recorded evidence - its type and exclusion after the deterministic
+// qualification - never from the attributor's claim or the raw model output. The "who" follows
+// from the type (the qualification makes type and actor consistent: an AI actor is never learner
+// performance, a SHARED actor is an assisted attempt), so a chip can never say "You" next to
+// "The AI did it".
+
+export type EvidenceKind = 'LEARNER' | 'ASSISTED' | 'AI_ASSISTANCE' | 'EXPOSURE';
+
+export function evidenceKind(type: EvidenceType): EvidenceKind {
+  if (type === 'EXPOSURE') return 'EXPOSURE';
+  if (type === 'OBSERVATION') return 'AI_ASSISTANCE';
+  if (type === 'ASSISTED_ATTEMPT') return 'ASSISTED';
+  return 'LEARNER'; // independent explanation / application / transfer, checks, teacher evidence
+}
+
+export const WHO_QUESTION = 'Who demonstrated this skill?';
+
+export const EVIDENCE_KIND: Record<EvidenceKind, { who: string | null; effect: string; summary: string }> = {
+  LEARNER: {
+    who: 'You',
+    effect: 'Independent learner evidence: counts toward mastery',
+    summary: 'Independent learner evidence recorded',
+  },
+  ASSISTED: {
+    who: 'You + AI',
+    effect: 'Shared work: counts with reduced weight',
+    summary: 'Assisted-attempt evidence recorded (you + AI)',
+  },
+  AI_ASSISTANCE: {
+    who: 'AI',
+    effect: 'AI-assistance evidence: no mastery credit',
+    summary: 'AI-assistance evidence recorded — no mastery credit',
+  },
+  EXPOSURE: {
+    who: null,
+    effect: 'Exposure only: does not affect mastery',
+    summary: 'Exposure only — does not affect mastery',
+  },
+};
+
+/** "Who demonstrated this skill?" for a recorded evidence type; exposure has no performer. */
+export function whoLabel(type: EvidenceType): string {
+  const who = EVIDENCE_KIND[evidenceKind(type)].who;
+  return who ? `Demonstrated by: ${who}` : 'Explanation seen';
+}
+
 export const ACTOR_LABEL: Record<EvidenceActor, string> = {
   STUDENT: 'You',
   AI: 'AI',
@@ -284,12 +332,24 @@ export function exclusionLabel(reason: string | null): string {
 
 export const ROUTE_LABEL: Record<SegmentRoute, string> = {
   MAP: 'Learning activity',
-  METADATA_ONLY: 'Learning-related, no skill action (kept as context)',
+  // LEARNING_RELEVANT + NOT_SKILL_BEARING: a learning question, but no skill was performed.
+  METADATA_ONLY: 'Learning activity — no skill evidence',
   STOP: 'Not learning activity (ignored)',
   UNCERTAIN: 'Unclear (kept, no evidence)',
 };
 
-export function segmentOutcomeLabel(segment: Pick<ActivitySegment, 'route' | 'mapping_outcome' | 'mappings'>): string {
+/**
+ * STOP covers learning relevance "low" as well as "none" (policy: only high / medium are learning
+ * activity). A "low" unit was recorded as somewhat learning-related - e.g. a one-line "what is
+ * python" - so it is not called "not learning"; it simply carries no skill evidence.
+ */
+export const LOW_RELEVANCE_LABEL = 'Low learning relevance — no skill evidence';
+
+type SegmentLike = Pick<ActivitySegment, 'route' | 'mapping_outcome' | 'mappings'> &
+  Partial<Pick<ActivitySegment, 'learning_relevance'>>;
+
+export function segmentOutcomeLabel(segment: SegmentLike): string {
+  if (segment.route === 'STOP' && segment.learning_relevance === 'low') return LOW_RELEVANCE_LABEL;
   if (segment.route !== 'MAP') return ROUTE_LABEL[segment.route];
   if (segment.mapping_outcome === 'MAPPED') {
     const accepted = segment.mappings.filter((m) => m.status === 'ACCEPTED').length;
@@ -300,18 +360,46 @@ export function segmentOutcomeLabel(segment: Pick<ActivitySegment, 'route' | 'ma
 }
 
 const OUTCOME_TEXT: Record<string, string> = {
-  EVIDENCE_RECORDED: 'Evidence recorded',
-  MAPPED_NO_EVIDENCE: 'Matched, no evidence qualified',
+  // Never shown bare: what the evidence means comes from the turn's recorded evidence.
+  EVIDENCE_RECORDED: 'Analysed — see the matched skills for what counts',
+  MAPPED_NO_EVIDENCE: 'Matched to a skill — no skill evidence qualified',
   ALREADY_ANALYZED: 'Analysed with its turn',
+  DEFERRED_TO_ASSISTANT: "Analysed together with the AI's reply",
   NON_LEARNING: 'Not learning activity',
-  ABSTAINED: 'No confident skill match',
-  METADATA_ONLY: 'Kept as context',
-  UNCERTAIN: 'Unclear, kept without evidence',
+  ABSTAINED: 'No confident skill match — no skill evidence',
+  METADATA_ONLY: ROUTE_LABEL.METADATA_ONLY,
+  UNCERTAIN: 'Unclear — kept without evidence',
 };
 
+/** The job outcome in words, without the turn's details (see turnOutcomeLabel). */
 export function processingOutcomeLabel(outcome: string | null): string | null {
   if (!outcome) return null;
   return OUTCOME_TEXT[outcome] ?? outcome.toLowerCase().replaceAll('_', ' ');
+}
+
+const SUMMARY_ORDER: EvidenceKind[] = ['LEARNER', 'ASSISTED', 'AI_ASSISTANCE', 'EXPOSURE'];
+
+/** What the turn's recorded evidence means: the strongest kind that still counts. */
+export function turnEvidenceSummary(segments: ActivitySegment[]): string | null {
+  const recorded = segments.flatMap((s) => s.mappings).filter((m) => m.status === 'ACCEPTED' && m.evidence_type);
+  if (recorded.length === 0) return null;
+  const kinds = new Set(recorded.filter((m) => !m.excluded).map((m) => evidenceKind(m.evidence_type!)));
+  if (kinds.size === 0) return 'Evidence recorded — not counted, at your request';
+  return EVIDENCE_KIND[SUMMARY_ORDER.find((k) => kinds.has(k))!].summary;
+}
+
+/**
+ * The turn's outcome for the learner. `segments` are the turn's task units (on its anchor
+ * message) when known: evidence wording then follows the recorded evidence, and a
+ * low-relevance unit is not called "not learning".
+ */
+export function turnOutcomeLabel(outcome: string | null, segments: ActivitySegment[] | null): string | null {
+  if (!outcome) return null;
+  if (segments && outcome === 'EVIDENCE_RECORDED') return turnEvidenceSummary(segments) ?? processingOutcomeLabel(outcome);
+  if (segments && outcome === 'NON_LEARNING' && segments.some((s) => s.route === 'STOP' && s.learning_relevance === 'low')) {
+    return LOW_RELEVANCE_LABEL;
+  }
+  return processingOutcomeLabel(outcome);
 }
 
 export function percent(value: number | null | undefined): string {

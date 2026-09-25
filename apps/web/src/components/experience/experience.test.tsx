@@ -111,7 +111,7 @@ describe('evidence timeline', () => {
     expect(why).toContain('STUDENT_WROTE_CODE');
     expect(why).toContain('href="/activity?focus=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,cccccccc-cccc-4ccc-8ccc-cccccccccccc"');
     expect(markup).toContain('Applied it yourself');
-    expect(markup).toContain('Actor: You');
+    expect(markup).toContain('Demonstrated by: You');
     expect(markup).toContain('Counts toward mastery');
     // A counted captured-activity event can be corrected both ways.
     expect(count(markup, 'data-testid="correction-form"')).toBe(2);
@@ -156,10 +156,12 @@ describe('activity list', () => {
       expect(markup).toContain(`data-testid="${id}"`);
     }
     expect(markup).toContain('Writing for loops');
-    expect(markup).toContain('Actor: You');
+    expect(markup).toContain('Demonstrated by: You');
     expect(markup).toContain('Applied it yourself');
+    expect(markup).toContain('Independent learner evidence: counts toward mastery');
     expect(markup).toContain('Matched to 1 skill');
-    expect(markup).toContain('Evidence recorded');
+    expect(markup).toContain('Independent learner evidence recorded');
+    expect(markup).not.toContain('Actor:');
     expect(markup).toContain('data-action="WRONG_SKILL"');
     expect(markup).toContain('data-action="DONT_COUNT"');
   });
@@ -188,8 +190,11 @@ describe('activity list', () => {
       outcome_signal: 'NOT_APPLICABLE',
     };
     const chip = html(<ActivityList rows={[row]} returnTo="/activity" submit={submit} />);
-    expect(chip).toContain('Actor: AI');
-    expect(chip).not.toContain('Actor: You');
+    expect(chip).toContain('Demonstrated by: AI');
+    expect(chip).not.toContain('Demonstrated by: You');
+    expect(chip).toContain('AI-assistance evidence: no mastery credit');
+    expect(chip).toContain('AI-assistance evidence recorded — no mastery credit');
+    expect(chip).not.toContain('Independent learner evidence');
     expect(chip).toContain('data-testid="chip-qualification"');
     expect(chip).toContain('matches an earlier AI answer in this conversation');
 
@@ -203,10 +208,48 @@ describe('activity list', () => {
       qualification_reason: 'COPIED_FROM_AI',
     });
     const timeline = html(<EvidenceTimeline items={[event]} returnTo="/skills/x" submit={submit} />);
-    expect(timeline).toContain('Actor: AI');
+    expect(timeline).toContain('Demonstrated by: AI');
+    expect(timeline).not.toContain('Demonstrated by: You');
     expect(timeline).toContain('data-testid="evidence-qualification"');
     expect(timeline).toContain('Your text (also in an earlier AI answer)');
     expect(timeline).not.toContain('Your words');
+  });
+
+  it('reads the turn outcome of the reply from its anchor message (P9)', () => {
+    // "what is python": recorded as academic / learn / low relevance -> STOP. The reply's job
+    // carries the outcome NON_LEARNING; the unit (on the question) carries the relevance.
+    const question = activityRow({
+      processing_outcome: 'DEFERRED_TO_ASSISTANT',
+      segments: [
+        {
+          ...activityRow().segments[0],
+          route: 'STOP',
+          route_reason: 'NON_LEARNING',
+          learning_relevance: 'low',
+          intent: 'learn',
+          mapping_outcome: null,
+          mappings: [],
+          evidence_count: 0,
+        },
+      ],
+    });
+    const reply = activityRow({
+      id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc',
+      role: 'assistant',
+      processing_outcome: 'NON_LEARNING',
+      analyzed_in: question.id,
+      segments: [],
+    });
+    const markup = html(<ActivityList rows={[reply, question]} returnTo="/activity" submit={submit} />);
+    expect(markup.split('Low learning relevance — no skill evidence').length - 1).toBe(2); // row + unit
+    expect(markup).not.toContain('Not learning activity');
+    expect(markup).toContain("Analysed together with the AI&#x27;s reply");
+
+    // A true non-learning turn keeps its label.
+    question.segments[0] = { ...question.segments[0], learning_relevance: 'none' };
+    const none = html(<ActivityList rows={[reply, question]} returnTo="/activity" submit={submit} />);
+    expect(none).toContain('Not learning activity');
+    expect(none).not.toContain('Low learning relevance');
   });
 
   it('shows no reclassification note when the evidence was recorded as attributed', () => {

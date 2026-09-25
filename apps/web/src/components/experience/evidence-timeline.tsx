@@ -5,8 +5,8 @@ import type { FeedbackFormState } from '@/app/feedback/actions';
 import { ToneBadge } from '@/components/experience/badges';
 import { CorrectionButton } from '@/components/experience/correction-button';
 import {
-  ACTOR_LABEL,
   EVIDENCE_TYPE_LABEL,
+  WHO_QUESTION,
   OUTCOME_LABEL,
   exclusionLabel,
   formatTime,
@@ -14,6 +14,7 @@ import {
   percent,
   qualificationNote,
   studentSpanLabel,
+  whoLabel,
 } from '@/lib/experience';
 
 type Submit = (state: FeedbackFormState, formData: FormData) => Promise<FeedbackFormState>;
@@ -56,7 +57,9 @@ export function EvidenceTimeline({ items, returnTo, submit }: { items: EvidenceT
           >
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium">{EVIDENCE_TYPE_LABEL[event.evidence_type]}</span>
-              <ToneBadge tone="neutral">Actor: {ACTOR_LABEL[event.actor]}</ToneBadge>
+              <span title={WHO_QUESTION} className="inline-flex" data-testid="evidence-who">
+                <ToneBadge tone="neutral">{whoLabel(event.evidence_type)}</ToneBadge>
+              </span>
               <span className="text-muted-foreground">{OUTCOME_LABEL[event.outcome_signal]}</span>
               <span className="text-muted-foreground">· {independenceLabel(event.independence)}</span>
               <span className="text-muted-foreground">· {formatTime(event.occurred_at)}</span>
