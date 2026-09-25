@@ -419,6 +419,29 @@ def test_invented_ids_twice_abstain_as_one_uncertain_segment() -> None:
     assert result.qualification_run_id == recorder.runs[-1].id
 
 
+@pytest.mark.parametrize("invented_id", [str(uuid4()), "python-loops"])
+def test_unranked_invented_mapping_is_repaired_then_abstains(invented_id) -> None:
+    # Regression (P8): a mapped id outside the pool that the model did not rank entered the
+    # top-K as an implicit rank and crashed the turn (KeyError / ValueError).
+    invented = one_segment(proposal(invented_id, 0.99), ranked=[])
+    provider = FakeProvider(route_responder(turn=[invented, invented]))
+    gateway, recorder = make_gateway(provider)
+    (seg,) = analyze(gateway).analyses
+    assert len(provider.calls) == 2
+    assert "not in the candidate list" in recorder.runs[1].error_message
+    assert (seg.route, seg.route_reason, seg.mapping) == ("UNCERTAIN", "MODEL_OUTPUT_INVALID", None)
+
+
+def test_unranked_invented_mapping_then_valid_output_maps() -> None:
+    invented = one_segment(proposal(str(uuid4()), 0.99), ranked=[])
+    good = one_segment(proposal(IDS[0], 0.9), ranked=IDS[:8])
+    provider = FakeProvider(route_responder(turn=[invented, good]))
+    gateway, _ = make_gateway(provider)
+    (seg,) = analyze(gateway).analyses
+    assert seg.mapping.outcome == "MAPPED"
+    assert [str(s.skill_id) for s in seg.mapping.skills] == [IDS[0]]
+
+
 def test_too_many_segments_is_invalid() -> None:
     many = {"segments": [turn_segment(f"task {i}") for i in range(5)]}
     provider = FakeProvider(route_responder(turn=[many, one_segment()]))

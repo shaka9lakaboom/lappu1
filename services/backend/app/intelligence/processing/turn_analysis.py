@@ -206,6 +206,13 @@ def analyze_turn(
                     f"segment {number}: ranked_candidate_ids not in the candidate list: {unknown[:5]}"
                 )
             ids = [m.skill_id for m in seg.mappings]
+            # An id outside the pool is invented even when it is left unranked (it would
+            # otherwise enter the top-K as an implicit rank).
+            invented = [i for i in ids if i not in pool_ids]
+            if invented:
+                raise ValueError(
+                    f"segment {number}: mappings not in the candidate list: {invented[:5]}"
+                )
             if len(set(ids)) != len(ids):
                 raise ValueError(f"segment {number}: each mapped skill_id may appear once")
             if len(ids) > max_skills:
