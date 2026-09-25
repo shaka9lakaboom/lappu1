@@ -26,7 +26,7 @@ from app.intelligence.skill_graph.canonical import skill_key
 
 # Idempotency key of a unit's analysis. Shared by both execution modes (ADR 0004): which
 # calls produced a decision is recorded by its prompt versions and mapper version.
-ANALYSIS_VERSION = "p3a-v1"
+from app.intelligence.versions import ANALYSIS_VERSION
 
 STAGED_PROMPT_VERSIONS = {
     "query_embedding": QUERY_INPUT_VERSION,
@@ -75,6 +75,18 @@ def _upsert_candidate(
         "select 1 from public.skill_aliases where normalized_alias = %s", (key,)
     ).fetchone():
         return None
+    # A rejected name stays rejected (migration 0009): the proposal counts on its row instead
+    # of reopening review.
+    rejected = conn.execute(
+        """
+        update public.skill_candidates set occurrences = occurrences + 1
+         where normalized_name = %s and status = 'REJECTED'
+        returning id
+        """,
+        (key,),
+    ).fetchone()
+    if rejected:
+        return rejected[0]
     parent_ok = (
         proposed.parent_candidate_id
         and conn.execute(

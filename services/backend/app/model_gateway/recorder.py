@@ -6,7 +6,8 @@ rolls back. If a run cannot be recorded the call is treated as failed: no
 model output is used without its trace.
 
 model_runs is also the request ledger of the daily budget (ADR 0004): every row
-without `cache_source_run_id` is one provider request.
+without `cache_source_run_id` is one provider request. Error messages are redacted
+(app/core/redaction.py) before they are written (ADR 0008).
 """
 
 from collections.abc import Callable
@@ -16,6 +17,7 @@ from typing import Protocol
 from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
+from app.core.redaction import redact
 from app.model_gateway.types import ModelRun
 
 
@@ -126,7 +128,8 @@ class DbModelRunRecorder:
                     run.attempt,
                     run.repair_of_id,
                     run.error_code,
-                    run.error_message[:2000] if run.error_message else None,
+                    # A provider / SDK error can echo a key, token or e-mail: never stored.
+                    redact(run.error_message, 2000),
                     run.learner_id,
                     run.course_id,
                     run.processing_job_id,

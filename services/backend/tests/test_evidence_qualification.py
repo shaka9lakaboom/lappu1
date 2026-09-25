@@ -150,6 +150,15 @@ def test_span_matching_tolerates_case_quotes_whitespace_and_ellipsis() -> None:
     assert not copied_from_ai("keeps every", [text], 24)
 
 
+def test_copy_guard_matches_an_elided_span_piece_by_piece() -> None:
+    reply = "Use this: SELECT c.name FROM customers c LEFT JOIN orders o ON o.customer_id = c.id"
+    # Before p8-v1 the ellipsis itself was searched for, so an elided copy was never detected.
+    assert copied_from_ai("SELECT c.name FROM customers c ... ON o.customer_id = c.id", [reply], 24)
+    assert not copied_from_ai("ON o.customer_id = c.id ... SELECT c.name", [reply], 24)  # order
+    # Common fragments of the learner's own work: long enough together, none long on its own.
+    assert not copied_from_ai("SELECT c ... FROM cust ... LEFT JOIN o ... ON o.cu", [reply], 24)
+
+
 def test_difficulty_multiplier_range_and_default() -> None:
     evidence = POLICY.evidence
     assert [difficulty_for(b, evidence) for b in (1, 2, 3, 4, 5)] == [0.0, 0.25, 0.5, 0.75, 1.0]

@@ -95,6 +95,22 @@ def test_old_delegation_outside_the_window_does_not_count() -> None:
     assert (d.eligible, d.recent_delegation_count) == (False, 0)
 
 
+def test_learner_text_found_in_earlier_ai_output_is_not_a_second_delegation() -> None:
+    """Regression (hosted, 2026-09-25): the learner asked "how to write a for loop" (one real
+    delegation), then later wrote the same canonical code with their own explanation and asked
+    the AI to check it. The copy guard made that code the AI's work (COPIED_FROM_AI). It must not
+    count as a second delegation: the AI output was produced (and counted) once."""
+    asked = delegation(days=0.03, reason="EXPLANATION_REQUESTED")
+    reused = delegation(
+        days=0.0, reason="STUDENT_WROTE_CODE", qualification_reason="COPIED_FROM_AI"
+    )
+    assert not is_delegation(reused, POLICY.debt, NOW)
+    d = debt([asked, reused], importance=0.9)
+    assert (d.eligible, d.score, d.actionable, d.recent_delegation_count) == (False, 0.0, False, 1)
+    # A genuine second delegation still counts (the rule is the qualification reason, not actor).
+    assert debt([asked, delegation(days=0.0)], importance=0.9).eligible
+
+
 def test_student_actor_is_never_delegation() -> None:
     r = replace(record("ASSISTED_ATTEMPT", strength=0.1), rationale_code="HINT_THEN_COMPLETED")
     assert not is_delegation(r, POLICY.debt, NOW)

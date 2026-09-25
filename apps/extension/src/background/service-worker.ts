@@ -2,7 +2,8 @@
  * SkillMirror Companion service worker: session, durable queue, API sync.
  *
  * Content scripts hand captured envelopes here; the worker binds the signed-in
- * learner, stores them in the LocalQueue and flushes the queue to the API
+ * learner and the active course the learner chose in the popup (Auto = none),
+ * stores them in the LocalQueue and flushes the queue to the API
  * immediately, on a one-minute alarm, and when the network returns.
  */
 import type { UnboundEnvelope } from '../capture/CaptureManager';
@@ -13,11 +14,14 @@ import {
   isContentRequest,
   isPopupRequest,
   STORAGE_KEYS,
+  WORKER_KEYS,
   type ActionResponse,
+  type CoursesResponse,
   type PopupRequest,
   type StatusResponse,
 } from '../shared/messages';
 import { AuthError, SupabaseAuthClient } from './auth';
+import { bindEnvelopes, effectiveChoice, fetchCourses } from './courses';
 import { SyncEngine, type FlushOutcome } from './sync';
 
 const workerStartedAt = new Date().toISOString();
@@ -86,7 +90,26 @@ async function status(): Promise<StatusResponse> {
   };
 }
 
-async function handlePopup(request: PopupRequest): Promise<StatusResponse | ActionResponse> {
+async function activeCourse(): Promise<string | null> {
+  const stored = await chrome.storage.local.get(WORKER_KEYS.activeCourseId);
+  const value = stored[WORKER_KEYS.activeCourseId];
+  return typeof value === 'string' ? value : null;
+}
+
+async function courses(): Promise<CoursesResponse> {
+  const session = auth ? await auth.getSession().catch(() => null) : null;
+  if (!session || !CONFIG.apiUrl) {
+    return { type: 'COURSES', courses: [], activeCourseId: null, error: session ? 'Not configured.' : null };
+  }
+  const result = await fetchCourses(CONFIG.apiUrl, session.access_token);
+  if (!result.ok) return { type: 'COURSES', courses: [], activeCourseId: await activeCourse(), error: result.error };
+  // A course the learner no longer studies falls back to Auto.
+  const chosen = effectiveChoice(await activeCourse(), result.courses);
+  await chrome.storage.local.set({ [WORKER_KEYS.activeCourseId]: chosen });
+  return { type: 'COURSES', courses: result.courses, activeCourseId: chosen, error: null };
+}
+
+async function handlePopup(request: PopupRequest): Promise<StatusResponse | ActionResponse | CoursesResponse> {
   switch (request.type) {
     case 'GET_STATUS':
       return status();
@@ -103,6 +126,7 @@ async function handlePopup(request: PopupRequest): Promise<StatusResponse | Acti
     }
     case 'SIGN_OUT':
       await auth?.signOut();
+      await chrome.storage.local.remove(WORKER_KEYS.activeCourseId);
       await refreshCaptureFlag();
       return { ok: true };
     case 'SET_PAUSED':
@@ -113,6 +137,11 @@ async function handlePopup(request: PopupRequest): Promise<StatusResponse | Acti
       const outcome = await flush(true);
       return { ok: outcome === 'synced' || outcome === 'idle', error: outcome };
     }
+    case 'GET_COURSES':
+      return courses();
+    case 'SET_ACTIVE_COURSE':
+      await chrome.storage.local.set({ [WORKER_KEYS.activeCourseId]: request.courseId });
+      return { ok: true };
   }
 }
 
@@ -120,10 +149,7 @@ async function handleCapture(events: UnboundEnvelope[]): Promise<ActionResponse>
   const session = auth ? await auth.current() : undefined;
   if (!session) return { ok: false, error: 'signed_out' };
   if (await isPaused()) return { ok: false, error: 'paused' };
-  await queue.enqueue(
-    session.user.id,
-    events.map((event) => ({ ...event, learner_id: session.user.id })),
-  );
+  await queue.enqueue(session.user.id, bindEnvelopes(events, session.user.id, await activeCourse()));
   void flush();
   return { ok: true };
 }

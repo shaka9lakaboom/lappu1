@@ -1,7 +1,8 @@
 /**
  * Runtime messages between extension contexts.
  *
- * popup -> service worker: GET_STATUS, SIGN_IN, SIGN_OUT, SET_PAUSED, SYNC_NOW
+ * popup -> service worker: GET_STATUS, SIGN_IN, SIGN_OUT, SET_PAUSED, SYNC_NOW,
+ *                          GET_COURSES, SET_ACTIVE_COURSE
  * content script -> service worker: CAPTURE_EVENTS
  * popup -> content script: CONTENT_PING
  *
@@ -12,6 +13,7 @@
 import type { UnboundEnvelope } from '../capture/CaptureManager';
 import type { CaptureState } from '../capture/CaptureManager';
 import type { CaptureStatus } from '../content/captureStatus';
+import type { CourseChoice } from '../background/courses';
 import type { LastSync } from '../background/sync';
 
 export interface GetStatusRequest {
@@ -32,6 +34,14 @@ export interface SetPausedRequest {
 export interface SyncNowRequest {
   type: 'SYNC_NOW';
 }
+export interface GetCoursesRequest {
+  type: 'GET_COURSES';
+}
+/** null = Auto: every course the learner studies. */
+export interface SetActiveCourseRequest {
+  type: 'SET_ACTIVE_COURSE';
+  courseId: string | null;
+}
 export interface CaptureEventsRequest {
   type: 'CAPTURE_EVENTS';
   events: UnboundEnvelope[];
@@ -40,7 +50,14 @@ export interface ContentPingRequest {
   type: 'CONTENT_PING';
 }
 
-export type PopupRequest = GetStatusRequest | SignInRequest | SignOutRequest | SetPausedRequest | SyncNowRequest;
+export type PopupRequest =
+  | GetStatusRequest
+  | SignInRequest
+  | SignOutRequest
+  | SetPausedRequest
+  | SyncNowRequest
+  | GetCoursesRequest
+  | SetActiveCourseRequest;
 export type ContentRequest = CaptureEventsRequest;
 
 export interface StatusResponse {
@@ -62,6 +79,14 @@ export interface StatusResponse {
   webUrl: string | null;
 }
 
+export interface CoursesResponse {
+  type: 'COURSES';
+  courses: CourseChoice[];
+  /** The chosen course, or null for Auto. */
+  activeCourseId: string | null;
+  error: string | null;
+}
+
 export interface ActionResponse {
   ok: boolean;
   error?: string;
@@ -80,6 +105,10 @@ export interface ContentStatusResponse {
 
 /** chrome.storage.local keys readable by content scripts (booleans only, no secrets). */
 export const STORAGE_KEYS = { captureEnabled: 'captureEnabled', paused: 'paused' } as const;
+/** Keys only the service worker reads (content scripts never choose a course). */
+export const WORKER_KEYS = { activeCourseId: 'activeCourseId' } as const;
+
+const COURSE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
@@ -89,7 +118,10 @@ export function isPopupRequest(value: unknown): value is PopupRequest {
     case 'GET_STATUS':
     case 'SIGN_OUT':
     case 'SYNC_NOW':
+    case 'GET_COURSES':
       return true;
+    case 'SET_ACTIVE_COURSE':
+      return value.courseId === null || (typeof value.courseId === 'string' && COURSE_ID.test(value.courseId));
     case 'SIGN_IN':
       return typeof value.email === 'string' && typeof value.password === 'string' && value.email.length <= 320 && value.password.length <= 1024;
     case 'SET_PAUSED':
@@ -124,6 +156,7 @@ export function isUnboundEnvelope(value: unknown): value is UnboundEnvelope {
     Number.isInteger(value.revision_index) &&
     Array.isArray(value.attachment_metadata) &&
     typeof value.context_incomplete === 'boolean' &&
+    // Content scripts never choose a course: the service worker binds the learner's choice.
     value.active_course_id === null &&
     typeof value.content_hash === 'string' &&
     typeof value.client_event_id === 'string'

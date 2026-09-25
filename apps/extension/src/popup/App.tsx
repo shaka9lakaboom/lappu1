@@ -6,6 +6,7 @@ import type {
   ActionResponse,
   ContentPingRequest,
   ContentStatusResponse,
+  CoursesResponse,
   PopupRequest,
   StatusResponse,
 } from '../shared/messages';
@@ -53,6 +54,7 @@ export function App() {
   const [page, setPage] = useState<PageState>({ kind: 'checking' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [courses, setCourses] = useState<CoursesResponse | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -88,6 +90,21 @@ export function App() {
   };
 
   const status = worker.kind === 'ok' ? worker.status : null;
+  const signedIn = Boolean(status?.signedIn);
+
+  // The course list is loaded once per sign-in (not on every status poll).
+  useEffect(() => {
+    if (!signedIn) {
+      setCourses(null);
+      return;
+    }
+    void send<CoursesResponse>({ type: 'GET_COURSES' }).then(setCourses, () => setCourses(null));
+  }, [signedIn]);
+
+  const chooseCourse = async (courseId: string | null) => {
+    await send<ActionResponse>({ type: 'SET_ACTIVE_COURSE', courseId });
+    setCourses((current) => (current ? { ...current, activeCourseId: courseId } : current));
+  };
   const tracking = !status
     ? '…'
     : !status.configured
@@ -127,6 +144,29 @@ export function App() {
 
       {status?.signedIn && <Row label="Signed in as" value={status.email ?? 'unknown'} testId="identity" />}
       <Row label="Tracking" value={tracking} testId="tracking-status" />
+      {signedIn && courses && (
+        <label style={rowStyle}>
+          <span>Course</span>
+          <select
+            data-testid="course-picker"
+            value={courses.activeCourseId ?? ''}
+            onChange={(event) => void chooseCourse(event.currentTarget.value || null)}
+            style={{ font: 'inherit', maxWidth: 190 }}
+          >
+            <option value="">Auto (all my courses)</option>
+            {courses.courses.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {signedIn && courses?.error && (
+        <p style={{ margin: '4px 0', fontSize: 12 }} data-testid="course-error">
+          {courses.error} Captures use Auto.
+        </p>
+      )}
       <Row
         label="Provider"
         value={page.kind === 'checking' ? '…' : page.kind === 'supported' ? 'ChatGPT' : 'Unsupported page'}

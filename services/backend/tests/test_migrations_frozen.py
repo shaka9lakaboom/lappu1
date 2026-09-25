@@ -1,8 +1,12 @@
-"""Applied migrations never change (architecture §18.1): 0001-0007 are on hosted Supabase.
+"""Applied migrations never change (architecture §18.1): 0001-0008 are on hosted Supabase.
 
 Each file must keep the git blob id it had when it was pushed (0001-0006: main `ab2d73d`;
-0007: main `a0e6982`, the P5 merge). A schema change is always a new, higher-numbered migration
-(P6 = 0008, P7 = 0009).
+0007: main `a0e6982`, the P5 merge; 0008: main `4a648ac`, the P6 merge). A schema change is always
+a new, higher-numbered migration (P7 = 0009).
+
+The blob id is taken over the content as git stores it (`eol=lf`), so a Windows working copy
+with CRLF line endings still compares equal. The next migration to push must be LF on disk: the
+Supabase CLI records the file's bytes as the applied statements (hosted 0002 and 0008 carry CRs).
 """
 
 import hashlib
@@ -20,10 +24,13 @@ FROZEN = {
     "0005_attribution_evidence.sql": "ba13da434adc47336efff13621d5087ee16535ee",
     "0006_mastery_debt.sql": "caac46c582f446bbcfa9327c0bd62f5f64c01156",
     "0007_student_experience.sql": "e62dc91e9590be5d788e7023a074480865461c26",
+    "0008_verification.sql": "d44758809dc5148ba77da9df54a556bbbe3ea208",
 }
+NEXT = "0009_teacher_admin_ops.sql"
 
 
 def git_blob_id(data: bytes) -> str:
+    data = data.replace(b"\r\n", b"\n")
     return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
 
 
@@ -35,4 +42,8 @@ def test_applied_migration_is_unchanged(name) -> None:
 def test_migrations_are_numbered_without_gaps() -> None:
     numbers = sorted(int(p.name[:4]) for p in MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql"))
     assert numbers == list(range(1, len(numbers) + 1))
-    assert (MIGRATIONS / "0008_verification.sql").exists()
+    assert (MIGRATIONS / NEXT).exists()
+
+
+def test_the_next_migration_is_lf_on_disk() -> None:
+    assert b"\r" not in (MIGRATIONS / NEXT).read_bytes()

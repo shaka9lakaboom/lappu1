@@ -67,6 +67,15 @@ export function renderedText(root: Element, { preformatted = false }: { preforma
       out += NL;
       return;
     }
+    if (tag === 'MATH') {
+      // Rendered math (KaTeX / MathML): its TeX source once, never the MathML token soup (the
+      // visual copy next to it is aria-hidden and already skipped).
+      const tex = element.querySelector('annotation[encoding="application/x-tex"]')?.textContent?.trim();
+      if (tex) {
+        out += atLineStart() || out.endsWith(' ') ? tex : ` ${tex}`;
+        return;
+      }
+    }
     const block = BLOCK_TAGS.has(tag);
     if (block) endLine();
     const pre = inPre || preservesWhitespace(element);

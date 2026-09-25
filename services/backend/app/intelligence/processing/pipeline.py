@@ -51,7 +51,7 @@ def resolve_courses(
     """The explicitly selected course if the learner belongs to it, else all their courses."""
     base = """
         select c.id, c.name, c.subject, c.level from public.courses c
-          join public.course_memberships m on m.course_id = c.id and m.user_id = %s
+          join public.course_memberships m on m.course_id = c.id and m.user_id = %s and m.role = 'STUDENT'
          where c.status = 'ACTIVE'
     """
     if active_course_id is not None:

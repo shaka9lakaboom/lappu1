@@ -17,11 +17,16 @@ from uuid import UUID
 
 from psycopg import Connection
 
+from app.core.redaction import redact
+
 JOB_PROCESS_RAW_MESSAGE = "PROCESS_RAW_MESSAGE"
 JOB_BOOTSTRAP_COURSE_GRAPH = "BOOTSTRAP_COURSE_GRAPH"
 # P6 (ADR 0007): both keyed by the verification session (entity_type verification_session).
 JOB_GENERATE_VERIFICATION = "GENERATE_VERIFICATION"
 JOB_GRADE_VERIFICATION = "GRADE_VERIFICATION"
+# P7 (ADR 0008): (re-)embed one registry skill after a candidate approval or merge
+# (entity_type skill_node, no learner).
+JOB_EMBED_SKILL = "EMBED_SKILL"
 
 _BASE_BACKOFF = timedelta(seconds=30)
 _MAX_BACKOFF = timedelta(minutes=30)
@@ -66,6 +71,34 @@ def enqueue_job(
         (job_type, entity_type, entity_id, learner_id),
     ).fetchone()
     return row[0] if row else None
+
+
+def enqueue_or_rearm_job(
+    conn: Connection, *, job_type: str, entity_type: str, entity_id: UUID
+) -> UUID:
+    """A learner-less job that must run (again) for its entity: create it, or put a finished
+    (COMPLETED / FAILED) one back to PENDING with a fresh attempt budget. A job that is still
+    PENDING, RETRY_WAIT or PROCESSING is left as it is: it has not read the entity yet, or it
+    is reading it now."""
+    row = conn.execute(
+        """
+        insert into public.processing_jobs (job_type, entity_type, entity_id)
+        values (%s, %s, %s)
+        on conflict on constraint processing_jobs_type_entity_key do update
+           set state = 'PENDING', attempts = 0, available_at = now(), last_error = null,
+               completed_at = null, outcome = 'REARMED'
+         where public.processing_jobs.state in ('COMPLETED', 'FAILED')
+        returning id
+        """,
+        (job_type, entity_type, entity_id),
+    ).fetchone()
+    if row:
+        return row[0]
+    (job_id,) = conn.execute(
+        "select id from public.processing_jobs where job_type = %s and entity_id = %s",
+        (job_type, entity_id),
+    ).fetchone()
+    return job_id
 
 
 def claim_jobs(
@@ -167,6 +200,6 @@ def fail_job(conn: Connection, job_id: UUID, error: str, *, now: datetime | None
                    available_at = coalesce(%s, now()) + %s
              where id = %s
             """,
-            (state, error[:_MAX_ERROR_CHARS], now, retry_delay(attempts), job_id),
+            (state, redact(error, _MAX_ERROR_CHARS), now, retry_delay(attempts), job_id),
         )
     return state

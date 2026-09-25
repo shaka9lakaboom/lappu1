@@ -3,6 +3,7 @@ import type {
   CourseListResponse,
   HealthResponse,
   LedgerResponse,
+  MeResponse,
   Profile,
   Recommendation,
   RecommendationsResponse,
@@ -23,6 +24,7 @@ import { ApiError, apiRequest } from '@/lib/api';
 import { COURSE_COOKIE, resolveSelectedCourse } from '@/lib/course-selection';
 import { graphStatusLabel } from '@/lib/courses';
 import { MASTERY, countStates, type StateCounts } from '@/lib/experience';
+import { areaLinks } from '@/lib/roles';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { cn } from '@/lib/utils';
 
@@ -120,7 +122,7 @@ export default async function DashboardPage({ searchParams }: PageProps<'/dashbo
   const query = (await searchParams).course;
   const cookieValue = (await cookies()).get(COURSE_COOKIE)?.value;
 
-  const [{ data: profile, error: profileError }, apiStatus, learning] = await Promise.all([
+  const [{ data: profile, error: profileError }, apiStatus, learning, me] = await Promise.all([
     supabase
       .from('profiles')
       .select('id, role, display_name, timezone, created_at, updated_at')
@@ -128,6 +130,10 @@ export default async function DashboardPage({ searchParams }: PageProps<'/dashbo
       .maybeSingle<Profile>(),
     fetchApiStatus(),
     loadLearning(session?.access_token, cookieValue, query),
+    // Only decides which teacher / admin links to show; the backend re-checks the role.
+    session?.access_token
+      ? apiRequest<MeResponse>('/v1/me', session.access_token).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const selectedCourse = learning.state === 'ok' ? learning.courses.find((c) => c.id === learning.selected) : undefined;
 
@@ -135,6 +141,7 @@ export default async function DashboardPage({ searchParams }: PageProps<'/dashbo
     <main className="mx-auto max-w-5xl space-y-8 px-4 py-10 sm:px-6">
       <AppHeader
         current="/dashboard"
+        areas={areaLinks(me)}
         title="Dashboard"
         description={
           <>

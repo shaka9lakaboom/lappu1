@@ -31,8 +31,9 @@ def test_default_settings_build_the_architecture_policy_with_budget_and_cache(db
     assert gateway.routing.name == "architecture-default"
     assert gateway.routing.model_for("TURN_ANALYSIS") == "gemini-3.7-flash"
     assert gateway.routing.model_for("SKILL_GRAPH_BOOTSTRAP") == "gemini-3.7-flash"
-    (status,) = gateway.budget_status()  # only budgeted models this gateway can call
-    assert (status.model, status.limit, status.reserve) == ("gemini-3.7-flash", 20, 2)
+    # Only budgeted models this gateway can call; the embedding model is budgeted too (N1).
+    budgets = {s.model: (s.limit, s.reserve) for s in gateway.budget_status()}
+    assert budgets == {"gemini-3.7-flash": (20, 2), "gemini-embedding-2": (1000, 2)}
     assert isinstance(gateway._result_cache, TieredResultCache)
 
 

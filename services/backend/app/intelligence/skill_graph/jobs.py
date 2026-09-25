@@ -1,8 +1,11 @@
-"""BOOTSTRAP_COURSE_GRAPH job: generate -> canonicalize -> embed (architecture §8.2).
+"""BOOTSTRAP_COURSE_GRAPH job: generate -> canonicalize -> embed (architecture §8.2),
+and EMBED_SKILL: (re-)embed one registry skill (P7 candidate approval / merge, ADR 0008).
 
 Resumable: the course's graph_status records the last completed stage, so a
 retry after an embedding failure does not regenerate the graph, and a replay
-after completion is a no-op.
+after completion is a no-op. A FAILED bootstrap has lost that stage (graph_status
+FAILED); `stages.prepare_bootstrap_retry` restores it before a manual retry, so the retry
+only embeds when the graph was already canonicalized (no second generation, no graph v2).
 """
 
 import logging
@@ -10,14 +13,21 @@ from uuid import UUID
 
 from psycopg_pool import ConnectionPool
 
+from app.core.redaction import redact
 from app.intelligence.policy import load_policy
 from app.intelligence.skill_graph.bootstrap import CourseBrief, generate_course_graph
 from app.intelligence.skill_graph.embedding import embed_skills
 from app.intelligence.skill_graph.registry import canonicalize_and_persist
-from app.jobs.queue import JOB_BOOTSTRAP_COURSE_GRAPH, ClaimedJob, JobResult
+from app.jobs.queue import JOB_BOOTSTRAP_COURSE_GRAPH, JOB_EMBED_SKILL, ClaimedJob, JobResult
 from app.model_gateway import ModelGateway, RunContext
 
-__all__ = ["JOB_BOOTSTRAP_COURSE_GRAPH", "mark_bootstrap_failed", "run_bootstrap_job"]
+__all__ = [
+    "JOB_BOOTSTRAP_COURSE_GRAPH",
+    "JOB_EMBED_SKILL",
+    "mark_bootstrap_failed",
+    "run_bootstrap_job",
+    "run_embed_skill_job",
+]
 
 logger = logging.getLogger("skillmirror.skill_graph")
 
@@ -117,5 +127,16 @@ def mark_bootstrap_failed(pool: ConnectionPool, job: ClaimedJob, error: str, fin
                                        else graph_status end
              where id = %s and graph_status <> 'READY'
             """,
-            (error[:2000], final, job.entity_id),
+            (redact(error, 2000), final, job.entity_id),
         )
+
+
+def run_embed_skill_job(pool: ConnectionPool, gateway: ModelGateway, job: ClaimedJob) -> JobResult:
+    """Embed the skill's current text (name, description, aliases) if its vector is stale:
+    one embedding request, or none when the stored content hash already matches."""
+    context = RunContext(trace_id=f"job:{job.id}", processing_job_id=job.id)
+    with pool.connection() as conn:
+        report = embed_skills(conn, gateway, [job.entity_id], context)
+    if report.embedded:
+        return JobResult("SKILL_EMBEDDED")
+    return JobResult("ALREADY_EMBEDDED" if report.cached else "NOTHING_TO_EMBED")

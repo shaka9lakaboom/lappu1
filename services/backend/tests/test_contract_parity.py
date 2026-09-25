@@ -1,4 +1,4 @@
-"""TS contracts (packages/contracts) == Python contracts == database enums (migrations 0002-0008)."""
+"""TS contracts (packages/contracts) == Python contracts == database enums (migrations 0001-0009)."""
 
 import re
 from pathlib import Path
@@ -6,10 +6,14 @@ from typing import get_args
 
 import pytest
 
+from app.admin import models as admin
+from app.api.v1 import me
+from app.auth import roles
 from app.courses import models as course_models
 from app.experience import models as experience
 from app.intelligence import contracts
 from app.model_gateway import ModelRunStatus
+from app.teacher import models as teacher
 
 CONTRACTS = Path(__file__).resolve().parents[3] / "packages" / "contracts" / "src"
 
@@ -70,6 +74,15 @@ PARITY = {
     ),
     "TRANSFER_DISTANCES": (get_args(contracts.TransferDistance), None),
     "VERIFICATION_STATUSES": (get_args(experience.VerificationStatus), None),
+    # P7 (migration 0009)
+    "USER_ROLES": (get_args(roles.AppRole), "app_role"),
+    "AUDIT_ACTOR_TYPES": (get_args(admin.AuditActorType), "audit_actor_type"),
+    "AUDIT_ACTIONS": (get_args(admin.AuditAction), "audit_action"),
+    "BENCHMARK_MODES": (get_args(admin.BenchmarkMode), "benchmark_mode"),
+    "BENCHMARK_VERDICTS": (get_args(admin.BenchmarkVerdict), "benchmark_verdict"),
+    "JOB_RETRY_MODES": (get_args(admin.JobRetryMode), None),
+    "CANDIDATE_REVIEW_ACTIONS": (get_args(admin.CandidateReviewAction), None),
+    "INDEPENDENT_EVIDENCE_TYPES": (get_args(teacher.IndependentEvidenceType), None),
 }
 
 # TS interface -> Pydantic model with the same field names.
@@ -115,6 +128,46 @@ MODEL_PARITY = {
     "VerificationsResponse": experience.VerificationsResponse,
     "VerificationSubmissionRequest": experience.VerificationSubmissionRequest,
     "VerificationSubmissionResponse": experience.VerificationSubmissionResponse,
+    # P7 teacher + admin
+    "MeCapabilities": me.MeCapabilities,
+    "MeResponse": me.MeResponse,
+    "TeacherCourse": teacher.TeacherCourse,
+    "TeacherCoursesResponse": teacher.TeacherCoursesResponse,
+    "TeacherCohort": teacher.TeacherCohort,
+    "TeacherSkillRow": teacher.TeacherSkillRow,
+    "TeacherMappedSkill": teacher.TeacherMappedSkill,
+    "TeacherVerificationNeed": teacher.TeacherVerificationNeed,
+    "TeacherEvidenceCounts": teacher.TeacherEvidenceCounts,
+    "TeacherCourseOverview": teacher.TeacherCourseOverview,
+    "SkillRef": admin.SkillRef,
+    "CourseRef": admin.CourseRef,
+    "AdminJob": admin.AdminJob,
+    "AdminJobsResponse": admin.AdminJobsResponse,
+    "JobRetryRequest": admin.JobRetryRequest,
+    "JobRetryResponse": admin.JobRetryResponse,
+    "AdminModelRun": admin.AdminModelRun,
+    "ModelBudgetUsage": admin.ModelBudgetUsage,
+    "AdminModelRunsResponse": admin.AdminModelRunsResponse,
+    "SimilarSkill": admin.SimilarSkill,
+    "AdminSkillCandidate": admin.AdminSkillCandidate,
+    "AdminSkillCandidatesResponse": admin.AdminSkillCandidatesResponse,
+    "CandidateReviewRequest": admin.CandidateReviewRequest,
+    "CandidateReviewResponse": admin.CandidateReviewResponse,
+    "BenchmarkRunSummary": admin.BenchmarkRunSummary,
+    "AdminBenchmarkResponse": admin.AdminBenchmarkResponse,
+    "AuditEventSummary": admin.AuditEventSummary,
+    "AdminTotals": admin.AdminTotals,
+    "AdminOverview": admin.AdminOverview,
+    "AdminCourse": admin.AdminCourse,
+    "AdminCoursesResponse": admin.AdminCoursesResponse,
+    "AdminMember": admin.AdminMember,
+    "AdminCourseDetail": admin.AdminCourseDetail,
+    "CourseMemberAddRequest": admin.CourseMemberAddRequest,
+    "CourseMemberAddResponse": admin.CourseMemberAddResponse,
+    "AdminSkill": admin.AdminSkill,
+    "AdminSkillsResponse": admin.AdminSkillsResponse,
+    "AdminSkillCourse": admin.AdminSkillCourse,
+    "AdminSkillDetail": admin.AdminSkillDetail,
 }
 
 
@@ -214,3 +267,43 @@ def test_database_enums_match_contracts(db_pool) -> None:
     for name, (values, pg_type) in PARITY.items():
         if pg_type:
             assert enums[pg_type] == tuple(values), name
+
+
+def test_benchmark_detail_extends_the_summary() -> None:
+    source = (CONTRACTS / "admin.ts").read_text(encoding="utf-8")
+    match = re.search(
+        r"export interface BenchmarkRunDetail extends BenchmarkRunSummary \{(.*?)\n\}", source, re.S
+    )
+    assert match
+    extra = set(re.findall(r"^\s+(\w+)\??:", match.group(1), re.M))
+    assert extra == set(admin.BenchmarkRunDetail.model_fields) - set(
+        admin.BenchmarkRunSummary.model_fields
+    )
+
+
+def test_manual_retry_cap_matches() -> None:
+    source = (CONTRACTS / "admin.ts").read_text(encoding="utf-8")
+    assert f"export const MAX_MANUAL_RETRIES = {admin.MAX_MANUAL_RETRIES};" in source
+
+
+def test_teacher_payloads_carry_no_learner_debt_or_actor_field() -> None:
+    forbidden = {"learner_id", "user_id", "email", "display_name", "debt_score", "debt_band"}
+    forbidden |= {"debt_eligible", "actor", "mastery_mean", "recent_delegation_count"}
+    for model in (
+        teacher.TeacherCourse,
+        teacher.TeacherCohort,
+        teacher.TeacherSkillRow,
+        teacher.TeacherMappedSkill,
+        teacher.TeacherVerificationNeed,
+        teacher.TeacherEvidenceCounts,
+        teacher.TeacherCourseOverview,
+    ):
+        assert not set(model.model_fields) & forbidden, model.__name__
+
+
+def test_admin_payloads_never_carry_model_output_or_captured_text() -> None:
+    forbidden = {"output", "content_text", "prompt", "text", "evidence_span", "student_span"}
+    for name in MODEL_PARITY:
+        model = MODEL_PARITY[name]
+        if model.__module__ == admin.__name__:
+            assert not set(model.model_fields) & forbidden, name

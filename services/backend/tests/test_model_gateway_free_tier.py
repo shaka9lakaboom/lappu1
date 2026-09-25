@@ -348,15 +348,19 @@ def test_free_tier_settings_defaults_keep_the_architecture_model() -> None:
     settings = make_settings()
     assert settings.gemini_generation_model == "gemini-3.7-flash"
     assert settings.gemini_routine_model is None  # routing is opt-in
-    assert settings.daily_request_limits == {"gemini-3.7-flash": 20, "gemini-3.8-flash": 20}
+    # N1 (ADR 0008): Flash-Lite and the embedding model are budgeted by default too.
+    free_tier = {
+        "gemini-3.7-flash": 20,
+        "gemini-3.8-flash": 20,
+        "gemini-3.5-flash-lite": 500,
+        "gemini-embedding-2": 1000,
+    }
+    assert settings.daily_request_limits == free_tier
     assert settings.model_quota_reserve == 2
     assert settings.model_quota_timezone == "America/Los_Angeles"
     assert settings.model_result_cache and settings.turn_analysis_mode == "combined"
     # A blank value (copied from .env.example) keeps the budget; only "off" disables it.
-    assert make_settings(model_daily_request_limits=" ").daily_request_limits == {
-        "gemini-3.7-flash": 20,
-        "gemini-3.8-flash": 20,
-    }
+    assert make_settings(model_daily_request_limits=" ").daily_request_limits == free_tier
     assert make_settings(model_daily_request_limits="off").daily_request_limits == {}
     with pytest.raises(ValueError):
         make_settings(model_quota_timezone="Mars/Olympus_Mons")

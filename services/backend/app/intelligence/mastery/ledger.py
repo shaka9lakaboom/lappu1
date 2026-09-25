@@ -45,7 +45,8 @@ def load_records(
         """
         select e.id, e.skill_id, e.source_type::text, e.evidence_type::text, e.actor::text,
                e.outcome_signal::text, e.outcome, e.strength, e.evidence_confidence, e.occurred_at,
-               e.excluded, a.rationale_code, s.learning_relevance::text, m.status::text
+               e.excluded, a.rationale_code, s.learning_relevance::text, m.status::text,
+               e.qualification_reason
           from public.evidence_events e
           left join public.attributions a on a.id = e.attribution_id
           left join public.activity_segments s on s.id = e.segment_id
@@ -69,7 +70,7 @@ def skill_importance(
         """
         select cs.skill_id, max(cs.importance)
           from public.course_skills cs
-          join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %s
+          join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %s and m.role = 'STUDENT'
           join public.courses c on c.id = cs.course_id and c.status = 'ACTIVE'
          where cs.active and cs.skill_id = any(%s)
          group by cs.skill_id
@@ -234,7 +235,7 @@ def read_ledger(
     if (
         course_id is not None
         and not conn.execute(
-            "select 1 from public.course_memberships where course_id = %s and user_id = %s",
+            "select 1 from public.course_memberships where course_id = %s and user_id = %s and role = 'STUDENT'",
             (course_id, learner_id),
         ).fetchone()
     ):
@@ -245,7 +246,7 @@ def read_ledger(
             select cs.skill_id, array_agg(cs.course_id order by cs.course_id) as course_ids,
                    max(cs.importance) as importance
               from public.course_skills cs
-              join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s
+              join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s and m.role = 'STUDENT'
               join public.courses c on c.id = cs.course_id and c.status = 'ACTIVE'
              where cs.active and (%(course)s::uuid is null or cs.course_id = %(course)s::uuid)
              group by cs.skill_id

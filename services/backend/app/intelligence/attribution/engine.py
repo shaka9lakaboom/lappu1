@@ -7,8 +7,11 @@ confidence, the exact learner and assistant spans, the Appendix A.3 evidence
 type and the outcome signal of the learner's own performance.
 
 The model may return only the supplied accepted skill ids, exactly one result
-each. Anything else is invalid output: one repair call, then an explicit
-abstention - the mappings stay valid and no evidence is written. Nothing here
+each, and a learner performance span must not quote text the assistant already
+wrote earlier in the conversation (the copy guard's rule, checked here so the
+model gets to quote the learner's own contribution instead). Anything else is
+invalid output: one repair call, then an explicit abstention - the mappings stay
+valid and no evidence is written. Nothing here
 decides evidence strength, mastery or debt: that is deterministic code
 (app/intelligence/evidence, mastery, debt). Captured text is untrusted data.
 """
@@ -18,6 +21,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from app.intelligence.contracts import AttributionItem, AttributionOutput
+from app.intelligence.evidence.engine import PERFORMANCE_TYPES, copied_from_ai
 from app.model_gateway import (
     Message,
     ModelGateway,
@@ -27,8 +31,11 @@ from app.model_gateway import (
 )
 
 TASK_TYPE = "SKILL_ATTRIBUTION"
-PROMPT_VERSION = "skill-attribution/v1"
-ATTRIBUTOR_VERSION = "attributor/p3b-v1"
+# v2 (ADR 0008): the request lists the learner text found in earlier assistant output, and the
+# span rules say to quote the learner's own contribution instead (an own explanation of reused
+# code stays the learner's); checking or confirming the learner's work is not the AI doing it.
+PROMPT_VERSION = "skill-attribution/v2"
+ATTRIBUTOR_VERSION = "attributor/p8-v1"
 
 SYSTEM_PROMPT = """You are the contribution attributor of SkillMirror, an evidence-based learning \
 platform. SkillMirror records what a learner can independently demonstrate while using an AI \
@@ -75,10 +82,19 @@ the segment.
 
 Spans:
 - student_evidence_span: the exact short excerpt of the LEARNER message that shows the learner's \
-own contribution to the skill, copied verbatim; null if there is none.
+own contribution to the skill, copied verbatim; null if there is none. Never quote text listed \
+under "Reused assistant text": the assistant already wrote it earlier in the conversation, so it \
+is not the learner's own work, even when the learner retypes it or calls it their own. When the \
+learner re-uses such text AND adds their own explanation, reasoning or change, quote that own \
+part instead (non-adjacent parts may be joined with " ... ", in order) and choose the evidence \
+type it shows (e.g. INDEPENDENT_EXPLANATION for an explanation in the learner's own words). Only \
+when the learner added nothing of their own did the assistant perform the skill: actor AI, \
+OBSERVATION.
 - ai_evidence_span: the exact short excerpt of the ASSISTANT response that shows the assistant's \
 contribution; null if there is none.
-Text the learner pasted from earlier assistant output is not the learner's own work.
+Asking the assistant to check, confirm or review the learner's own work does not make the \
+assistant the actor: its confirmation judges the learner's work, it does not perform the skill \
+(outcome CORRECT when it confirms the work, INCORRECT when it has to fix a mistake).
 
 confidence in [0, 1] is your calibrated probability that actor and evidence_type are right. Use \
 >= 0.8 only when the segment clearly shows who performed the skill.
@@ -120,6 +136,12 @@ class AttributionRequest:
     recent_context: str
     course_context: str
     skills: tuple[AcceptedSkill, ...]
+    # Learner text found in earlier assistant output of the conversation (the copy guard's view).
+    reused_ai_text: tuple[str, ...] = ()
+    # The copy guard's inputs: a learner performance span it would reclassify as the AI's is
+    # invalid output (one repair). None = not checked here (the qualification still is).
+    prior_assistant_texts: tuple[str, ...] = ()
+    copy_guard_min_chars: int | None = None
 
 
 @dataclass(frozen=True)
@@ -147,6 +169,7 @@ def format_skills(skills: Sequence[AcceptedSkill]) -> str:
 
 
 def build_messages(request: AttributionRequest) -> list[Message]:
+    reused = "\n".join(f"- {t}" for t in request.reused_ai_text) or "(none)"
     focus = (
         f"Segment {request.segment_index + 1} of {request.segment_count} of this turn "
         "(attribute the skills for this part):\n"
@@ -158,6 +181,8 @@ def build_messages(request: AttributionRequest) -> list[Message]:
         f"{focus}<<<\n{request.segment_text}\n>>>\n\n"
         f"Earlier conversation (context only):\n<<<\n{request.recent_context or '(none)'}\n>>>\n\n"
         f"Learner message:\n<<<\n{request.learner_text or '(not captured)'}\n>>>\n\n"
+        "Reused assistant text (parts of the learner message found in earlier assistant "
+        f"messages of this conversation, normalized):\n<<<\n{reused}\n>>>\n\n"
         f"Assistant response:\n<<<\n{request.assistant_text or '(not captured)'}\n>>>\n\n"
         f"Accepted skills (attribute each one):\n{format_skills(request.skills)}"
     )
@@ -185,6 +210,25 @@ def attribute_segment(
         missing = sorted(expected - set(ids))
         if missing:
             raise ValueError(f"missing an attribution for accepted skill ids: {missing[:5]}")
+        if request.copy_guard_min_chars is None:
+            return
+        for a in output.attributions:
+            span = a.student_evidence_span
+            if (
+                a.actor in ("STUDENT", "SHARED")
+                and a.evidence_type in PERFORMANCE_TYPES
+                and span
+                and copied_from_ai(
+                    span, request.prior_assistant_texts, request.copy_guard_min_chars
+                )
+            ):
+                raise ValueError(
+                    f"skill {a.skill_id}: student_evidence_span quotes text the assistant "
+                    "already wrote earlier in this conversation (see Reused assistant "
+                    "text), so it is not the learner's own work. Quote the learner's own "
+                    "contribution instead (e.g. their explanation, with the evidence type "
+                    "it shows), or use actor AI with OBSERVATION if they added nothing."
+                )
 
     try:
         result = gateway.generate_structured(

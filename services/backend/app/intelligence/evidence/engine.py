@@ -10,7 +10,7 @@ EvidenceEvent draft or an explicit abstention. The rules, in order:
 2. Consistency is enforced, whatever the model said:
    an AI actor is never learner performance (-> OBSERVATION, or EXPOSURE);
    a SHARED actor is never independent (-> ASSISTED_ATTEMPT);
-   a learner span copied from earlier assistant output is the AI's work
+   a learner span copied from earlier assistant output of the conversation is the AI's work
    (-> actor AI, OBSERVATION).
 3. Hard guard: EXPOSURE and OBSERVATION have strength 0 and no outcome.
 4. Strength (Appendix B, B.1, B.2):
@@ -27,7 +27,9 @@ from dataclasses import dataclass
 from app.intelligence.contracts import AttributionItem
 from app.intelligence.policy import ZERO_STRENGTH_TYPES, AttributionPolicy, EvidencePolicy
 
-QUALIFIER_VERSION = "evidence/p3b-v1"
+# p8-v1 (ADR 0008 H8): the copy guard sees the conversation's earlier assistant messages (bounded),
+# not only the recent context window, and matches a learner span with elided parts piece by piece.
+QUALIFIER_VERSION = "evidence/p8-v1"
 EVIDENCE_CREATED = "EVIDENCE_CREATED"
 
 # Learner performance: needs a grounded learner span and a determined outcome.
@@ -86,11 +88,46 @@ def span_grounded(span: str, text: str) -> bool:
 
 
 def copied_from_ai(span: str, prior_assistant_texts: Sequence[str], min_chars: int) -> bool:
-    """A learner span of at least `min_chars` that already appeared in earlier assistant output."""
-    needle = normalize_span_text(span)
-    if len(needle) < min_chars:
+    """A learner span of at least `min_chars` that already appeared in earlier assistant output.
+
+    A span with an ellipsis counts its pieces: they must appear in order in one assistant
+    message, together at least `min_chars` long, the longest at least half of that (so a few
+    common fragments of the learner's own work never make it a copy)."""
+    pieces = [p for p in (normalize_span_text(p) for p in _ELLIPSIS.split(span)) if p]
+    if sum(len(p) for p in pieces) < min_chars or max(len(p) for p in pieces) * 2 < min_chars:
         return False
-    return any(needle in normalize_span_text(t) for t in prior_assistant_texts)
+    return any(span_grounded(span, t) for t in prior_assistant_texts)
+
+
+def reused_ai_text(
+    learner_text: str | None,
+    prior_assistant_texts: Sequence[str],
+    min_chars: int,
+    *,
+    max_history_chars: int = 200_000,
+) -> tuple[str, ...]:
+    """The parts of the learner's message that already appeared in earlier assistant output
+    (normalized as the copy guard sees them), longest runs of words first found, each at least
+    `min_chars` long. Deterministic. The attribution request lists them, so the attributor quotes
+    the learner's OWN contribution instead of reused AI output (ADR 0008)."""
+    words = normalize_span_text(learner_text or "").split()
+    # One haystack; the separator never occurs in normalized text, so no run spans two messages.
+    history = "\x00".join(normalize_span_text(t) for t in prior_assistant_texts)[:max_history_chars]
+    if not words or not history:
+        return ()
+    found: list[str] = []
+    start = 0
+    while start < len(words):
+        end = start
+        while end < len(words) and " ".join(words[start : end + 1]) in history:
+            end += 1
+        run = " ".join(words[start:end])
+        if end > start and len(run) >= min_chars:
+            found.append(run)
+            start = end
+        else:
+            start += 1
+    return tuple(found)
 
 
 def difficulty_for(difficulty_band: int | None, policy: EvidencePolicy) -> float:

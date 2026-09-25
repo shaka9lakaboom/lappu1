@@ -152,7 +152,7 @@ select r.id, r.skill_id, r.type::text, r.reason_code, r.priority, r.mastery_stat
   left join lateral (
       select c.course_id, c.importance
         from public.course_skills c
-        join public.course_memberships m on m.course_id = c.course_id and m.user_id = r.learner_id
+        join public.course_memberships m on m.course_id = c.course_id and m.user_id = r.learner_id and m.role = 'STUDENT'
         join public.courses co on co.id = c.course_id and co.status = 'ACTIVE'
        where c.skill_id = r.skill_id and c.active
        order by c.importance desc, c.course_id

@@ -9,6 +9,10 @@ delegation event is a non-excluded EvidenceEvent from captured AI activity where
 * the mapping was ACCEPTED, the segment learning-relevant, the evidence
   confidence high (>= min_evidence_confidence);
 * it is not a trivial utility use (reason code in trivial_reason_codes);
+* it is not learner text the copy guard found in earlier assistant output
+  (COPIED_FROM_AI): that AI output was the AI's work when it was produced - and a
+  delegation then, if the learner requested it - and re-using it in a later turn,
+  where the learner asked for nothing, never counts the same work twice;
 * it happened within the recent window.
 
 Eligibility needs at least `min_recent_delegations` (>= 2) such events, so one AI
@@ -52,9 +56,15 @@ class DebtResult:
     components: dict[str, Any]
 
 
+# Qualification reasons whose AI actor is a reclassification of the learner's own claim, not
+# AI work requested in this turn (ADR 0008, the 2026-09-25 hosted consistency defect).
+NOT_DELEGATION_REASONS = frozenset({"COPIED_FROM_AI"})
+
+
 def is_delegation(record: EvidenceRecord, policy: DebtPolicy, as_of: datetime) -> bool:
     return (
         not record.excluded
+        and record.qualification_reason not in NOT_DELEGATION_REASONS
         and record.source_type == "AI_ACTIVITY"
         and record.actor in policy.actor_weights
         and record.evidence_type in policy.delegation_evidence_types

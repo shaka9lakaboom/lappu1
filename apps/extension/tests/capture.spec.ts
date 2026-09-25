@@ -6,7 +6,8 @@
  *
  * Covers: popup sign-in, content-script capture, service-worker queueing,
  * backend offline -> queue kept -> recovery, browser restart with a queued
- * event, no resend after reload, Pause/Resume, supported-page detection.
+ * event, no resend after reload, Pause/Resume, supported-page detection, and
+ * the active-course picker (captures carry the chosen course; Auto = none).
  *
  * The live ChatGPT + hosted Supabase gate is separate (docs/project-state.md).
  */
@@ -38,7 +39,17 @@ interface StoredEvent {
   role: string;
   content_text: string;
   external_message_id: string | null;
+  active_course_id: string | null;
 }
+
+const PYTHON = '9440004a-a25e-4e15-94c0-17c21f6bd695';
+const COURSES = {
+  courses: [
+    { id: PYTHON, name: 'Introduction to Python Programming', role: 'STUDENT', status: 'ACTIVE' },
+    { id: '5d3c1b2a-0000-4000-8000-00000000c0de', name: 'Relational Databases', role: 'STUDENT', status: 'ACTIVE' },
+    { id: '11111111-2222-4333-8444-555555555555', name: 'A course I teach', role: 'TEACHER', status: 'ACTIVE' },
+  ],
+};
 
 const api = {
   online: true,
@@ -84,6 +95,10 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     });
   }
   if (url.pathname === '/auth/v1/logout') return json(res, 204, {});
+  if (url.pathname === '/v1/courses' && req.method === 'GET') {
+    if (req.headers.authorization !== `Bearer ${ACCESS_TOKEN}`) return json(res, 401, { detail: 'invalid token' });
+    return json(res, 200, COURSES);
+  }
   if (url.pathname === '/v1/events/batch') {
     api.attempts++;
     api.authHeaders.add(String(req.headers.authorization));
@@ -274,5 +289,43 @@ test('capture -> queue -> authenticated sync, surviving outage and restart', asy
   await expect.poll(() => [...api.stored.values()].map((e) => e.content_text), { timeout: 20_000 }).toContain('Typed after resuming');
   expect(api.stored.size).toBe(5);
 
+  await context.close();
+});
+
+test('the active-course picker binds the chosen course to new captures', async () => {
+  // Still signed in from the previous test (same browser profile).
+  const context = await launch();
+  const ui = await popup(context);
+  await expect(ui.getByTestId('identity')).toHaveText('learner@e2e.test');
+  const picker = ui.getByTestId('course-picker');
+  await expect(picker).toBeVisible();
+  // Auto first, then only the courses the learner studies (never a taught course).
+  await expect(picker.locator('option')).toHaveText([
+    'Auto (all my courses)',
+    'Introduction to Python Programming',
+    'Relational Databases',
+  ]);
+  await expect(picker).toHaveValue('');
+
+  await picker.selectOption(PYTHON);
+  const chat = await context.newPage();
+  await chat.goto(`https://chatgpt.com/uc/${CONV}`);
+  await renderState(chat, 'lightweight-complete.html');
+  await appendUserMessage(chat, 'aaaaaaaa-1111-4000-8000-000000000003', 'Captured with a course');
+  await expect
+    .poll(() => [...api.stored.values()].find((e) => e.content_text === 'Captured with a course')?.active_course_id, {
+      timeout: 20_000,
+    })
+    .toBe(PYTHON);
+
+  // The choice survives reopening the popup; switching back to Auto sends none.
+  const again = await popup(context);
+  await expect(again.getByTestId('course-picker')).toHaveValue(PYTHON);
+  await again.getByTestId('course-picker').selectOption('');
+  await appendUserMessage(chat, 'aaaaaaaa-1111-4000-8000-000000000004', 'Captured on Auto');
+  await expect
+    .poll(() => [...api.stored.values()].some((e) => e.content_text === 'Captured on Auto'), { timeout: 20_000 })
+    .toBe(true);
+  expect([...api.stored.values()].find((e) => e.content_text === 'Captured on Auto')?.active_course_id).toBeNull();
   await context.close();
 });

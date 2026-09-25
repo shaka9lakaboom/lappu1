@@ -211,3 +211,93 @@ def test_an_empty_skill_list_is_a_programming_error() -> None:
             AttributionRequest("x", 0, 1, "x", None, "", "course", ()),
             CONTEXT,
         )
+
+
+# --- Reused assistant text (ADR 0008 §26) -------------------------------------------------------
+
+EARLIER = "Like this: for k in range(4): print(k) It prints 0 1 2 3."
+OWN = (
+    "Here is my own code: for k in range(4):\n    print(k)\n"
+    "My understanding is that range(4) yields 0 to 3, so the print runs four times."
+)
+
+
+def reused_request(target: AcceptedSkill) -> AttributionRequest:
+    from dataclasses import replace
+
+    from app.intelligence.evidence.engine import reused_ai_text
+
+    return replace(
+        request(target, learner=OWN),
+        reused_ai_text=reused_ai_text(OWN, [EARLIER], 24),
+        prior_assistant_texts=(EARLIER,),
+        copy_guard_min_chars=24,
+    )
+
+
+def cites(target: AcceptedSkill, span: str, evidence_type: str = "INDEPENDENT_APPLICATION"):
+    return {
+        "attributions": [
+            attribution(str(target.skill_id), evidence_type=evidence_type, student_span=span)
+        ]
+    }
+
+
+def test_the_request_lists_the_reused_assistant_text() -> None:
+    target = skill("Writing for loops")
+    own = cites(target, "range(4) yields 0 to 3", "INDEPENDENT_EXPLANATION")
+    provider = FakeProvider(route_responder(attribution=own))
+    gateway, _ = make_gateway(provider)
+    attribute_segment(gateway, reused_request(target), CONTEXT)
+    prompt = provider.calls[0]["messages"][0].content
+    assert "Reused assistant text" in prompt and "- for k in range(4): print(k)" in prompt
+
+
+def test_a_span_quoting_reused_ai_text_is_repaired_to_the_learner_s_own_part() -> None:
+    target = skill("Writing for loops")
+    provider = FakeProvider(
+        route_responder(
+            attribution=[
+                cites(target, "for k in range(4):\n    print(k)"),
+                cites(target, "range(4) yields 0 to 3", "INDEPENDENT_EXPLANATION"),
+            ]
+        )
+    )
+    gateway, recorder = make_gateway(provider)
+    result = attribute_segment(gateway, reused_request(target), CONTEXT)
+    assert len(provider.calls) == 2
+    assert "quotes text the assistant already wrote" in recorder.runs[0].error_message
+    item = result.items[str(target.skill_id)]
+    assert (item.evidence_type, item.student_evidence_span) == (
+        "INDEPENDENT_EXPLANATION",
+        "range(4) yields 0 to 3",
+    )
+
+
+def test_insisting_on_reused_ai_text_abstains() -> None:
+    target = skill("Writing for loops")
+    provider = FakeProvider(
+        route_responder(attribution=[cites(target, "for k in range(4): print(k)")] * 2)
+    )
+    gateway, _ = make_gateway(provider)
+    result = attribute_segment(gateway, reused_request(target), CONTEXT)
+    assert (result.items, result.abstain_reason) == (None, "MODEL_OUTPUT_INVALID")
+
+
+def test_the_ai_s_own_work_may_quote_reused_text_and_needs_no_repair() -> None:
+    target = skill("Writing for loops")
+    honest = {
+        "attributions": [
+            attribution(
+                str(target.skill_id),
+                "AI",
+                evidence_type="OBSERVATION",
+                outcome="NOT_APPLICABLE",
+                ai_span="for k in range(4): print(k)",
+            )
+        ]
+    }
+    provider = FakeProvider(route_responder(attribution=honest))
+    gateway, _ = make_gateway(provider)
+    assert attribute_segment(gateway, reused_request(target), CONTEXT).items is not None
+    assert len(provider.calls) == 1

@@ -174,6 +174,49 @@ describe('activity list', () => {
     expect(markup).not.toContain('data-action="WRONG_SKILL"');
   });
 
+  it('shows the recorded actor, the same as the timeline, when the qualification overruled the attributor', () => {
+    // Regression (hosted, 2026-09-25): the attributor said STUDENT, the copy guard recorded the
+    // evidence as the AI's (the code was in an earlier AI answer). The chip showed "Actor: You"
+    // next to "The AI did it"; it now shows the evidence actor and why.
+    const row = activityRow();
+    row.segments[0].mappings[0] = {
+      ...row.segments[0].mappings[0],
+      actor: 'AI',
+      attributed_actor: 'STUDENT',
+      qualification_reason: 'COPIED_FROM_AI',
+      evidence_type: 'OBSERVATION',
+      outcome_signal: 'NOT_APPLICABLE',
+    };
+    const chip = html(<ActivityList rows={[row]} returnTo="/activity" submit={submit} />);
+    expect(chip).toContain('Actor: AI');
+    expect(chip).not.toContain('Actor: You');
+    expect(chip).toContain('data-testid="chip-qualification"');
+    expect(chip).toContain('matches an earlier AI answer in this conversation');
+
+    const event = evidenceItem({
+      actor: 'AI',
+      evidence_type: 'OBSERVATION',
+      outcome_signal: 'NOT_APPLICABLE',
+      outcome: null,
+      independence: 0,
+      strength: 0,
+      qualification_reason: 'COPIED_FROM_AI',
+    });
+    const timeline = html(<EvidenceTimeline items={[event]} returnTo="/skills/x" submit={submit} />);
+    expect(timeline).toContain('Actor: AI');
+    expect(timeline).toContain('data-testid="evidence-qualification"');
+    expect(timeline).toContain('Your text (also in an earlier AI answer)');
+    expect(timeline).not.toContain('Your words');
+  });
+
+  it('shows no reclassification note when the evidence was recorded as attributed', () => {
+    const markup = html(<ActivityList rows={[activityRow()]} returnTo="/activity" submit={submit} />);
+    expect(markup).not.toContain('data-testid="chip-qualification"');
+    expect(html(<EvidenceTimeline items={[evidenceItem()]} returnTo="/x" submit={submit} />)).not.toContain(
+      'data-testid="evidence-qualification"',
+    );
+  });
+
   it('points the answer of an analysed turn to its question', () => {
     const answer = activityRow({ id: OTHER_SKILL, role: 'assistant', segments: [], processing_outcome: 'ALREADY_ANALYZED' });
     const markup = html(<ActivityList rows={[answer]} returnTo="/activity" submit={submit} />);

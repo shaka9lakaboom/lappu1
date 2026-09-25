@@ -12,6 +12,7 @@ import {
   formatTime,
   percent,
   processingOutcomeLabel,
+  qualificationNote,
   segmentOutcomeLabel,
 } from '@/lib/experience';
 
@@ -46,6 +47,9 @@ function Segment({ segment, returnTo, submit }: { segment: ActivitySegment; retu
               {m.evidence_type ? (
                 <span className="text-xs text-muted-foreground" data-testid="chip-evidence-type">
                   {EVIDENCE_TYPE_LABEL[m.evidence_type]}
+                  {qualificationNote(m.qualification_reason) ? (
+                    <span data-testid="chip-qualification"> · {qualificationNote(m.qualification_reason)}</span>
+                  ) : null}
                 </span>
               ) : m.attribution_status ? (
                 <span className="text-xs text-muted-foreground">No evidence qualified</span>

@@ -157,14 +157,16 @@ returns void language sql as $$
     on conflict (learner_id, skill_id) do update set mastery_state = excluded.mastery_state;
 $$;
 
--- Schema: a clean reset applies 0001-0008; 0001-0007 are the migrations on hosted ----------
+-- Schema: a clean reset applies 0001-0008 (later migrations follow; 0009 pins the full list);
+-- 0001-0007 are the migrations on hosted -------------------------------------------------------
 select results_eq(
-    $$ select version from supabase_migrations.schema_migrations order by version $$,
+    $$ select version from supabase_migrations.schema_migrations where version <= '0008' order by version $$,
     $$ values ('0001'), ('0002'), ('0003'), ('0004'), ('0005'), ('0006'), ('0007'), ('0008') $$,
     'a clean reset applies migrations 0001-0008 in order');
+-- Line endings normalized: hosted 0002 was pushed from a CRLF working copy (the same SQL).
 select results_eq(
-    $$ select version, md5(array_to_string(statements, E'\n')) from supabase_migrations.schema_migrations
-        where version < '0008' order by version $$,
+    $$ select version, md5(replace(array_to_string(statements, E'\n'), E'\r', ''))
+         from supabase_migrations.schema_migrations where version < '0008' order by version $$,
     $$ values ('0001', '9477b175ef5b89ac07bdc8e01fca2800'), ('0002', 'ebcb2441c8c46e992d01ec2f48b990f9'),
               ('0003', 'a0cdc191e7c762e627eaca93bf1c0dc9'), ('0004', 'cfe38898bea85339e1fabf21fd07ecaf'),
               ('0005', 'a10c5f549c48fb042b72088bd1c7afd7'), ('0006', '94d268e3073dc3bdedb99a54fa8b690a'),

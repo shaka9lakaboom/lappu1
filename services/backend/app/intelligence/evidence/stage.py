@@ -20,7 +20,7 @@ from uuid import UUID
 from psycopg_pool import ConnectionPool
 
 from app.intelligence.attribution.engine import AttributionRequest, attribute_segment
-from app.intelligence.evidence.engine import Qualification, qualify_attribution
+from app.intelligence.evidence.engine import Qualification, qualify_attribution, reused_ai_text
 from app.intelligence.evidence.persist import (
     pending_segments,
     persist_attribution,
@@ -29,10 +29,13 @@ from app.intelligence.evidence.persist import (
 )
 from app.intelligence.mastery.ledger import recompute_ledger
 from app.intelligence.policy import IntelligencePolicy
-from app.intelligence.processing.turn import ProcessingUnit
+from app.intelligence.processing.turn import ProcessingUnit, earlier_assistant_texts
 from app.intelligence.recommendations.service import refresh_recommendations
 from app.intelligence.relevance.engine import ProcessingUnitText
 from app.model_gateway import ModelGateway, RunContext
+
+# How many earlier assistant messages of the conversation the copy guard searches.
+COPY_GUARD_HISTORY_MESSAGES = 50
 
 
 @dataclass(frozen=True)
@@ -62,12 +65,21 @@ def run_evidence_stage(
 ) -> EvidenceStageResult:
     with pool.connection() as conn:
         pending = pending_segments(conn, unit.anchor.id)
+        # The copy guard's history: the conversation's earlier assistant messages (bounded),
+        # a superset of the recent context window (ADR 0008 H8).
+        prior_assistant = (
+            earlier_assistant_texts(conn, unit.anchor, COPY_GUARD_HISTORY_MESSAGES)
+            if pending
+            else []
+        )
 
-    prior_assistant = [m.content_text for m in unit.context if m.role == "assistant"]
     snapshot = {
         "attribution": policy.attribution.model_dump(mode="json"),
         "evidence": policy.evidence.model_dump(mode="json"),
     }
+    reused = reused_ai_text(
+        text.user_text, prior_assistant, policy.attribution.copy_guard_min_chars
+    )
     attributed = 0
     for segment in pending:
         request = AttributionRequest(
@@ -79,6 +91,9 @@ def run_evidence_stage(
             recent_context=text.recent_context,
             course_context=text.course_context,
             skills=segment.skills,
+            reused_ai_text=reused,
+            prior_assistant_texts=tuple(prior_assistant),
+            copy_guard_min_chars=policy.attribution.copy_guard_min_chars,
         )
         result = attribute_segment(gateway, request, context)
         qualifications: dict[str, Qualification] = {}

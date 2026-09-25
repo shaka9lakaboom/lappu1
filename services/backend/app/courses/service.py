@@ -49,7 +49,8 @@ select c.id, c.name, c.subject, c.level, c.description, c.status::text, c.graph_
          where j.entity_id = c.id and j.job_type = 'BOOTSTRAP_COURSE_GRAPH'),
        c.created_at, c.updated_at
   from public.courses c
-  join public.course_memberships m on m.course_id = c.id and m.user_id = %(learner)s
+  join public.course_memberships m
+    on m.course_id = c.id and m.user_id = %(learner)s and m.role = 'STUDENT'
 """
 
 

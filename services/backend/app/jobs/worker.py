@@ -3,7 +3,8 @@
 Claims jobs with FOR UPDATE SKIP LOCKED (so several workers can run safely),
 dispatches them by job type, completes, defers or fails them with backoff, and
 recovers jobs left PROCESSING by a crashed worker. The same code runs inside
-the API process (started by app.main when configured) or standalone:
+the API process (started by app.main when configured) or standalone. At startup and once
+per UTC day it also runs the daily maintenance (the stale-ledger sweep, no model call):
 
     python -m app.jobs.worker            # loop until Ctrl+C
     python -m app.jobs.worker --once     # drain what is runnable now, then exit
@@ -24,6 +25,7 @@ from psycopg_pool import ConnectionPool
 
 from app.jobs.queue import (
     JOB_BOOTSTRAP_COURSE_GRAPH,
+    JOB_EMBED_SKILL,
     JOB_GENERATE_VERIFICATION,
     JOB_GRADE_VERIFICATION,
     JOB_PROCESS_RAW_MESSAGE,
@@ -50,6 +52,9 @@ BACKPRESSURE_MAX_DELAY = 600
 BUDGET_MAX_DELAY = 3600
 
 Handler = Callable[[ClaimedJob], JobResult]
+# Daily maintenance: returns a report (logged); a report with `remaining` = True asks to be
+# run again on the next poll (a batch was full).
+Maintenance = Callable[[], object]
 FailureHook = Callable[[ClaimedJob, str, bool], None]
 
 
@@ -76,6 +81,7 @@ class Worker:
         batch_size: int = 4,
         stale_after: timedelta = timedelta(minutes=15),
         failure_hooks: dict[str, FailureHook] | None = None,
+        daily: Maintenance | None = None,
     ) -> None:
         self._pool = pool
         self._handlers = handlers
@@ -83,6 +89,8 @@ class Worker:
         self._batch_size = batch_size
         self._stale_after = stale_after
         self._failure_hooks = failure_hooks or {}
+        self._daily = daily
+        self._daily_done_on: object = None  # the UTC date of the last finished run
         self.stats = WorkerStats()
 
     def run_once(self) -> int:
@@ -123,6 +131,7 @@ class Worker:
             int(self._stale_after.total_seconds()),
         )
         while not stop.is_set():
+            self.run_daily()
             try:
                 claimed = self.run_once()
             except Exception:
@@ -131,6 +140,22 @@ class Worker:
             if claimed == 0:
                 stop.wait(poll_seconds)
         logger.info("worker %s stopped", self.worker_id)
+
+    def run_daily(self, now: datetime | None = None) -> bool:
+        """Run the daily maintenance if it has not finished today (UTC). Returns whether it
+        ran. A failure is logged and retried on a later poll, never raised."""
+        today = (now or datetime.now(UTC)).date()
+        if self._daily is None or self._daily_done_on == today:
+            return False
+        try:
+            report = self._daily()
+        except Exception:
+            logger.exception("daily maintenance failed; retried on a later poll")
+            return True
+        logger.info("daily maintenance: %s", report)
+        if not getattr(report, "remaining", False):
+            self._daily_done_on = today
+        return True
 
     def _execute(self, job: ClaimedJob) -> None:
         try:
@@ -225,10 +250,16 @@ def build_worker(
     **kwargs: object,
 ) -> Worker:
     """The production worker: P2 course bootstrap + raw-message processing (P3A mapping,
-    P3B attribution/evidence, P4 ledger) + P6 verification generation and grading.
+    P3B attribution/evidence, P4 ledger) + P6 verification generation and grading + P7 skill
+    (re-)embedding after a candidate review, and the daily stale-ledger sweep (P8 H7).
     `evidence=False` stops after P3A (tests)."""
+    from app.intelligence.mastery.sweep import sweep_stale_ledgers
     from app.intelligence.processing.pipeline import process_raw_message_job
-    from app.intelligence.skill_graph.jobs import mark_bootstrap_failed, run_bootstrap_job
+    from app.intelligence.skill_graph.jobs import (
+        mark_bootstrap_failed,
+        run_bootstrap_job,
+        run_embed_skill_job,
+    )
     from app.intelligence.verification.jobs import (
         mark_generation_failed,
         mark_grading_failed,
@@ -245,6 +276,7 @@ def build_worker(
             ),
             JOB_GENERATE_VERIFICATION: partial(run_generation_job, pool, gateway),
             JOB_GRADE_VERIFICATION: partial(run_grading_job, pool, gateway),
+            JOB_EMBED_SKILL: partial(run_embed_skill_job, pool, gateway),
         },
         failure_hooks={
             JOB_BOOTSTRAP_COURSE_GRAPH: lambda job, error, final: mark_bootstrap_failed(
@@ -257,6 +289,7 @@ def build_worker(
                 pool, job, error, final
             ),
         },
+        daily=partial(sweep_stale_ledgers, pool),
         **kwargs,  # type: ignore[arg-type]
     )
 

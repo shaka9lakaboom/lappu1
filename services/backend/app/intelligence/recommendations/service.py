@@ -37,7 +37,7 @@ _SCOPE_SQL = """
 with scope as (
     select cs.skill_id, max(cs.importance) as importance
       from public.course_skills cs
-      join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s
+      join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s and m.role = 'STUDENT'
       join public.courses c on c.id = cs.course_id and c.status = 'ACTIVE'
      where cs.active
      group by cs.skill_id
@@ -199,7 +199,7 @@ _READ_SQL = """
 with scope as (
     select cs.skill_id, array_agg(distinct cs.course_id) as course_ids
       from public.course_skills cs
-      join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s
+      join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s and m.role = 'STUDENT'
       join public.courses c on c.id = cs.course_id and c.status = 'ACTIVE'
      where cs.active
      group by cs.skill_id

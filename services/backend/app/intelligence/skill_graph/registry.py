@@ -54,7 +54,7 @@ def resolve_keys(conn: Connection, keys: list[str]) -> dict[str, UUID]:
     return {key: skill_id for key, skill_id in rows}
 
 
-def _unique_slug(conn: Connection, name: str) -> str:
+def unique_slug(conn: Connection, name: str) -> str:
     base = slugify(name)
     slug = base
     while conn.execute("select 1 from public.skill_nodes where slug = %s", (slug,)).fetchone():
@@ -83,7 +83,7 @@ def _create_node(
         returning id
         """,
         (
-            _unique_slug(conn, name),
+            unique_slug(conn, name),
             name,
             skill_key(name),
             description,

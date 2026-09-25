@@ -287,7 +287,14 @@ class ActivityMappedSkill(_Out):
     confidence: float = Field(ge=0, le=1)
     evidence_span: str | None
     attribution_status: AttributionStatus | None
+    # The actor of the recorded evidence (after qualification); None when no evidence was
+    # recorded. Equal to the skill timeline's event actor for the same evidence.
     actor: EvidenceActor | None
+    # The attributor's claim, before qualification (e.g. STUDENT for text the copy guard found in
+    # earlier AI output, which the evidence records as AI with reason COPIED_FROM_AI).
+    attributed_actor: EvidenceActor | None
+    # Why the evidence was recorded as it was (QUALIFIED, COPIED_FROM_AI, ...); None without one.
+    qualification_reason: str | None
     attribution_confidence: float | None
     # EVIDENCE_CREATED or the abstention reason of the evidence qualification.
     evidence_decision: str | None
