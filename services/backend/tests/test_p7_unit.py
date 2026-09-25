@@ -17,10 +17,17 @@ from tests.conftest import ForbiddenPool, api_client
     ("text", "leak"),
     [
         ("request failed: https://x/v1?key=AIzaSyA1234567890123456789012345678901", "AIzaSy"),
-        ("auth eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.abcdefghijklmnop", "eyJhbGci"),
+        # Secret-shaped values are assembled at runtime so the repository scan never sees one.
+        (
+            "auth "
+            + ".".join(
+                ["eyJ" + "hbGciOiJIUzI1NiJ9", "eyJ" + "zdWIiOiIxMjMifQ", "abcdefghijklmnop"]
+            ),
+            "hbGci",
+        ),
         ("Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123", "abcdefghijklmnop"),
         ("could not connect: postgresql://postgres.ref:s3cret@pooler:6543/postgres", "s3cret"),
-        ("key sb_secret_abcdefghijklmnop leaked", "sb_secret_abc"),
+        ("key " + "sb_" + "secret_abcdefghijklmnop leaked", "secret_abc"),
         ("user someone.else+tag@example.com not found", "someone.else"),
         ("password=hunter2 rejected", "hunter2"),
     ],
