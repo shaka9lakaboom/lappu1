@@ -631,6 +631,9 @@ def verify(args, pool, supabase_url: str, anon: str) -> Report:
         state["email"],
         (OUT / "ui-learner.password").read_text(encoding="utf-8"),
     )
+    # The backend verifies `iat` without leeway; this machine's clock can trail Supabase Auth's by
+    # about a second, so a token used at once may be "not yet valid" (a known P0 limitation).
+    time.sleep(3)
     api = Http(args.api, token)
     detail = api.get(f"/v1/verifications/{session}")
     result = detail["session"]["result"]

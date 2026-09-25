@@ -333,10 +333,13 @@ def seed_turns(
     policy: IntelligencePolicy,
     now: datetime,
 ) -> list[UUID]:
-    """Captured turns through the production qualification and persistence (no model call)."""
+    """Captured turns through the production qualification and persistence (no model call).
+
+    One pooled connection and one transaction per turn: a dropped connection (seen once on the
+    hosted pooler) affects at most one atomic turn, never a half-written one."""
     evidence = []
-    with pool.connection() as conn:
-        for index, (skill_id, fields) in enumerate(plan):
+    for index, (skill_id, fields) in enumerate(plan):
+        with pool.connection() as conn:
             with conn.transaction():
                 turn = seed_turn(
                     conn,
