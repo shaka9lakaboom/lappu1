@@ -6,7 +6,7 @@ prints a secret: only names, flags, model ids, counts and migration versions.
                                             caller put in the environment): valid? worker on?
                                             which models and budget?
     python scripts/demo_probe.py database   READ ONLY: hosted reachable, applied migrations,
-                                            connected backends, open jobs, stuck jobs
+                                            open jobs, stuck jobs
 
 Each prints one JSON object on stdout and exits 0 (1 when the probe itself fails).
 """
@@ -86,10 +86,6 @@ def database() -> dict:
                         "select version from supabase_migrations.schema_migrations order by 1"
                     ).fetchall()
                 ]
-                backends = conn.execute(
-                    "select count(*) from pg_stat_activity "
-                    "where datname = current_database() and application_name = 'skillmirror-backend'"
-                ).fetchone()[0]
                 jobs = dict(
                     conn.execute(
                         "select state::text, count(*) from public.processing_jobs "
@@ -111,7 +107,6 @@ def database() -> dict:
         "ok": True,
         "host": urlsplit(s.database_url.get_secret_value()).hostname,
         "migrations": migrations,
-        "backend_connections": backends,
         "open_jobs": jobs,
         "stuck_pending": stuck_pending,
         "stuck_processing": stuck_processing,

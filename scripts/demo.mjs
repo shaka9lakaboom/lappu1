@@ -366,11 +366,13 @@ export async function verify(options = {}) {
     db.ok === true && db.migrations.join(',') === expected,
     db.ok ? `remote ${db.migrations.join(',') || 'none'}` : 'unknown',
   );
+  // Liveness without writing anything: nothing waits longer than a few minutes and no lock is
+  // stale. (Connection names cannot tell: the Supabase pooler reports every client as Supavisor.)
   check(
     'worker processing',
-    db.ok === true && db.backend_connections > 0 && db.stuck_pending === 0 && db.stuck_processing === 0,
+    db.ok === true && db.stuck_pending === 0 && db.stuck_processing === 0,
     db.ok
-      ? `${db.backend_connections} backend connection(s); open jobs ${JSON.stringify(db.open_jobs)}; stuck pending ${db.stuck_pending}, stuck processing ${db.stuck_processing}`
+      ? `open jobs ${JSON.stringify(db.open_jobs)}; waiting > 3 min ${db.stuck_pending}, stale locks ${db.stuck_processing}`
       : 'unknown',
   );
 

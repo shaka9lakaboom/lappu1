@@ -238,7 +238,7 @@ test('verify passes on a healthy demo and names every failed check otherwise', a
       probe: (command) =>
         command === 'config'
           ? OK_CONFIG
-          : { ok: true, host: 'pooler', migrations: ['0001', '0002'], backend_connections: 2, open_jobs: {}, stuck_pending: 0, stuck_processing: 0 },
+          : { ok: true, host: 'pooler', migrations: ['0001', '0002'], open_jobs: {}, stuck_pending: 0, stuck_processing: 0 },
       migrations: ['0001', '0002'],
       extension: { dist, src: join(dir, 'x') },
       log: () => {},
@@ -248,7 +248,7 @@ test('verify passes on a healthy demo and names every failed check otherwise', a
     const broken = await verify({
       ...healthy,
       fetcher: async () => ({ status: 0, error: 'ECONNREFUSED' }),
-      probe: (command) => (command === 'config' ? { ...OK_CONFIG, routine_model: null, routing: 'architecture-default' } : { ok: true, host: 'pooler', migrations: ['0001'], backend_connections: 0, open_jobs: { PENDING: 3 }, stuck_pending: 3, stuck_processing: 0 }),
+      probe: (command) => (command === 'config' ? { ...OK_CONFIG, routine_model: null, routing: 'architecture-default' } : { ok: true, host: 'pooler', migrations: ['0001'], open_jobs: { PENDING: 3 }, stuck_pending: 3, stuck_processing: 0 }),
       log: (text) => lines.push(text),
     });
     assert.deepEqual(broken, ['backend /health', 'web reachable', 'Flash-Lite demo route', 'migrations 0001-0002', 'worker processing']);
