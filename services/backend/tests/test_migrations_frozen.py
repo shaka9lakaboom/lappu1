@@ -1,7 +1,8 @@
-"""Applied migrations never change (architecture §18.1): 0001-0006 are on hosted Supabase.
+"""Applied migrations never change (architecture §18.1): 0001-0007 are on hosted Supabase.
 
-Each file must keep the git blob id it had when it was pushed (main `ab2d73d`). A schema change
-is always a new, higher-numbered migration (P5 = 0007, P6 = 0008).
+Each file must keep the git blob id it had when it was pushed (0001-0006: main `ab2d73d`;
+0007: main `a0e6982`, the P5 merge). A schema change is always a new, higher-numbered migration
+(P6 = 0008, P7 = 0009).
 """
 
 import hashlib
@@ -18,6 +19,7 @@ FROZEN = {
     "0004_model_gateway_cache.sql": "3eefb84d66b07a7f5da26f5a37ed668f387f85ae",
     "0005_attribution_evidence.sql": "ba13da434adc47336efff13621d5087ee16535ee",
     "0006_mastery_debt.sql": "caac46c582f446bbcfa9327c0bd62f5f64c01156",
+    "0007_student_experience.sql": "e62dc91e9590be5d788e7023a074480865461c26",
 }
 
 
@@ -33,4 +35,4 @@ def test_applied_migration_is_unchanged(name) -> None:
 def test_migrations_are_numbered_without_gaps() -> None:
     numbers = sorted(int(p.name[:4]) for p in MIGRATIONS.glob("[0-9][0-9][0-9][0-9]_*.sql"))
     assert numbers == list(range(1, len(numbers) + 1))
-    assert (MIGRATIONS / "0007_student_experience.sql").exists()
+    assert (MIGRATIONS / "0008_verification.sql").exists()

@@ -1,4 +1,4 @@
-"""TS contracts (packages/contracts) == Python contracts == database enums (migrations 0002-0007)."""
+"""TS contracts (packages/contracts) == Python contracts == database enums (migrations 0002-0008)."""
 
 import re
 from pathlib import Path
@@ -54,6 +54,22 @@ PARITY = {
     "FACTOR_LEVELS": (get_args(experience.FactorLevel), None),
     "DEBT_FACTOR_CODES": (get_args(experience.DebtFactorCode), None),
     "MASTERY_GATE_CODES": (get_args(experience.MasteryGateCode), None),
+    # P6 (migration 0008)
+    "VERIFICATION_STATES": (get_args(contracts.VerificationState), "verification_state"),
+    "VERIFICATION_ASSESSMENT_TYPES": (
+        get_args(contracts.VerificationAssessmentType),
+        "verification_assessment_type",
+    ),
+    "VERIFICATION_GRADER_TYPES": (
+        get_args(contracts.VerificationGraderType),
+        "verification_grader_type",
+    ),
+    "VERIFICATION_EVALUATOR_TYPES": (
+        get_args(contracts.VerificationEvaluatorType),
+        "verification_evaluator_type",
+    ),
+    "TRANSFER_DISTANCES": (get_args(contracts.TransferDistance), None),
+    "VERIFICATION_STATUSES": (get_args(experience.VerificationStatus), None),
 }
 
 # TS interface -> Pydantic model with the same field names.
@@ -83,6 +99,22 @@ MODEL_PARITY = {
     "ActivitySegment": experience.ActivitySegment,
     "ActivityRow": experience.ActivityRow,
     "ActivityResponse": experience.ActivityResponse,
+    # P6 verification
+    "ChallengeChoice": contracts.ChallengeChoice,
+    "RubricCriterion": contracts.RubricCriterion,
+    "VerificationGenerationOutput": contracts.VerificationGenerationOutput,
+    "CriterionResult": contracts.CriterionResult,
+    "VerificationEvaluation": contracts.VerificationEvaluation,
+    "VerificationChoice": experience.VerificationChoice,
+    "VerificationCriterion": experience.VerificationCriterion,
+    "VerificationResult": experience.VerificationResult,
+    "VerificationSessionSummary": experience.VerificationSessionSummary,
+    "VerificationChallenge": experience.VerificationChallenge,
+    "VerificationDetailResponse": experience.VerificationDetailResponse,
+    "VerificationBudget": experience.VerificationBudget,
+    "VerificationsResponse": experience.VerificationsResponse,
+    "VerificationSubmissionRequest": experience.VerificationSubmissionRequest,
+    "VerificationSubmissionResponse": experience.VerificationSubmissionResponse,
 }
 
 
@@ -106,9 +138,14 @@ def ts_interface_fields(name: str) -> set[str]:
     return set(re.findall(r"^\s+(\w+)\??:", match.group(1), re.M))
 
 
+def contract_fields(model) -> set[str]:
+    """Field names as they appear on the wire (an alias such as A.5 `pass` wins)."""
+    return {f.alias or name for name, f in model.model_fields.items()}
+
+
 @pytest.mark.parametrize("name", sorted(MODEL_PARITY))
 def test_typescript_interfaces_match_pydantic_models(name) -> None:
-    assert ts_interface_fields(name) == set(MODEL_PARITY[name].model_fields)
+    assert ts_interface_fields(name) == contract_fields(MODEL_PARITY[name])
 
 
 def test_attribution_evidence_types_are_evidence_types_plus_other() -> None:
@@ -118,9 +155,32 @@ def test_attribution_evidence_types_are_evidence_types_plus_other() -> None:
     assert not proposed & {"VERIFICATION", "EXECUTION_RESULT", "TEACHER_EVIDENCE"}
 
 
-@pytest.mark.parametrize("model", [contracts.AttributionItem, contracts.AttributionOutput])
+@pytest.mark.parametrize(
+    "model",
+    [
+        contracts.AttributionItem,
+        contracts.AttributionOutput,
+        contracts.VerificationGenerationOutput,
+        contracts.ChallengeChoice,
+        contracts.RubricCriterion,
+        contracts.VerificationEvaluation,
+        contracts.CriterionResult,
+        experience.VerificationSubmissionRequest,
+    ],
+)
 def test_model_outputs_forbid_extra_fields(model) -> None:
     assert model.model_config.get("extra") == "forbid"
+
+
+def test_verification_assessment_types_are_the_registry_assessment_types() -> None:
+    assert get_args(contracts.VerificationAssessmentType) == get_args(course_models.AssessmentType)
+
+
+def test_the_learner_challenge_never_carries_the_answer_key_or_rubric() -> None:
+    exposed = set(experience.VerificationChallenge.model_fields) | set(
+        experience.VerificationSessionSummary.model_fields
+    )
+    assert not exposed & {"expected_answer", "rubric", "validation", "prompt_fingerprint"}
 
 
 def test_feedback_targets_match() -> None:

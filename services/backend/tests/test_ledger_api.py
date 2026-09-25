@@ -41,7 +41,7 @@ def test_ledger_joins_course_skills_with_derived_state(
     empty = client.get("/v1/ledger", headers=auth(make_token(learner)))
     assert empty.status_code == 200
     skills = empty.json()["skills"]
-    assert len(skills) == 30 and empty.json()["algorithm_version"] == "ledger/p4-v1"
+    assert len(skills) == 30 and empty.json()["algorithm_version"] == "ledger/p6-v1"
     assert {s["mastery_state"] for s in skills} == {"UNKNOWN"}
     assert all(
         s["mastery_mean"] is None and s["support"] == 0 and s["debt_score"] == 0 for s in skills

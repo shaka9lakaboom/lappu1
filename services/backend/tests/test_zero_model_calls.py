@@ -1,4 +1,5 @@
-"""P5 makes no model call (ADR 0006): its modules never load the ModelGateway or a provider SDK.
+"""P5 makes no model call (ADR 0006), and neither does any P6 request (ADR 0007): these modules
+never load the ModelGateway or a provider SDK. P6 generation and grading run in the worker.
 
 Checked in a fresh interpreter, so modules imported by other tests cannot mask a dependency.
 The database tests additionally assert that model_runs never grows across every P5 endpoint.
@@ -23,6 +24,15 @@ P5_MODULES = (
     "app.intelligence.recommendations.engine",
     "app.intelligence.recommendations.service",
     "app.intelligence.explanation",
+    # P6: every HTTP path of the Verification Center (planning included) is model-free.
+    "app.api.v1.verifications",
+    "app.experience.verifications",
+    "app.intelligence.verification.planner",
+    "app.intelligence.verification.graders",
+    "app.intelligence.verification.validator",
+    "app.intelligence.verification.evidence",
+    "app.intelligence.mastery.engine",
+    "app.intelligence.debt.engine",
 )
 
 
