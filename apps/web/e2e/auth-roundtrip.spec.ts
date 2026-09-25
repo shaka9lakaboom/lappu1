@@ -60,17 +60,22 @@ test('sign up, persist, sign out, sign in, sign out', async ({ page }) => {
     await page.getByRole('button', { name: 'Create account' }).click();
 
     const confirmationNotice = page.getByText('Check your email');
-    await expect(page.getByTestId('user-id').or(confirmationNotice)).toBeVisible();
+    await expect(page.getByTestId('user-email').or(confirmationNotice)).toBeVisible();
     if (await confirmationNotice.isVisible()) {
       throw new Error('Supabase "Confirm email" is enabled; disable it for the dev project to run this gate.');
     }
 
-    // 2. Session established and protected dashboard reachable.
+    // 2. Session established and protected dashboard reachable. The dashboard shows no raw ids or
+    //    diagnostics (P9); the account record lives on Settings & diagnostics.
     await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page.getByTestId('user-email')).toHaveText(email);
+    await expect(page.getByTestId('user-id')).toHaveCount(0);
+    await expect(page.getByTestId('api-status')).toHaveCount(0);
+    expect(await authCookieNames(page)).not.toHaveLength(0);
+    await page.getByTestId('settings-link').click();
+    await expect(page).toHaveURL(/\/settings$/);
     userId = (await page.getByTestId('user-id').textContent())?.trim();
     expect(userId).toMatch(/^[0-9a-f-]{36}$/);
-    await expect(page.getByTestId('user-email')).toHaveText(email);
-    expect(await authCookieNames(page)).not.toHaveLength(0);
 
     // 3. Supabase Auth user exists server-side.
     const { data: authUser, error: authError } = await admin.auth.admin.getUserById(userId!);
@@ -103,8 +108,9 @@ test('sign up, persist, sign out, sign in, sign out', async ({ page }) => {
 
     // 5. Refresh keeps the same session.
     await page.reload();
-    await expect(page).toHaveURL(/\/dashboard$/);
+    await expect(page).toHaveURL(/\/settings$/);
     await expect(page.getByTestId('user-id')).toHaveText(userId!);
+    await page.goto('/dashboard');
 
     // 6. Sign out removes the session.
     await page.getByRole('button', { name: 'Sign out' }).click();
@@ -118,7 +124,9 @@ test('sign up, persist, sign out, sign in, sign out', async ({ page }) => {
     await page.getByLabel('Password').fill(password);
     await page.getByRole('button', { name: 'Sign in' }).click();
     await expect(page).toHaveURL(/\/dashboard$/);
+    await page.goto('/settings');
     await expect(page.getByTestId('user-id')).toHaveText(userId!);
+    await page.goto('/dashboard');
 
     await page.getByRole('button', { name: 'Sign out' }).click();
     await expect(page).toHaveURL(/\/sign-in$/);
