@@ -25,29 +25,41 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4 and P5 are merged. **`main` = `a0e6982546c82bb4dbb1920894fb6d4711ccfa34`** (merge of PR #5). |
+| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4, P5 and P6 are merged. **`main` = `4a648ac2100738a228b3506cfb21e734c6756f02`** (merge of PR #6). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
 | P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
 | P5 merge commit | `a0e6982546c82bb4dbb1920894fb6d4711ccfa34` (PR #5, head `0f12dc7`) |
-| Development branch | `skillmirror-p6-verification-loop` (P6, from `a0e6982`) |
-| Previous branch | `skillmirror-p5-student-experience` (merged in PR #5) |
+| P6 merge commit | `4a648ac2100738a228b3506cfb21e734c6756f02` (PR #6, head `583aea4`; the PR-triggered CI on that head passed before the merge) |
+| Development branch | `skillmirror-p7-p8-teacher-admin-hardening` (P7 + P8, from `4a648ac`) |
+| Previous branch | `skillmirror-p6-verification-loop` (merged in PR #6) |
 | P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | P2 + P3A commits (merged) | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
 | CI (P3B + P4) | green on the PR #4 head before the merge |
 | CI (P2 + P3A) | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P6 → `main`: opened after the hosted acceptance (PASS) and a green CI; **not merged** by the agent. P5: PR #5, **merged** as `a0e6982`. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
+| Pull request | P7 + P8 → `main`: one PR, opened after the hosted P7 acceptance and a green CI; not merged by the agent. P6: PR #6, **merged** as `4a648ac`. P5: PR #5, **merged** as `a0e6982`. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
-**Current phase: P6 — Verification Loop.** Branch `skillmirror-p6-verification-loop` from `main`
-`a0e6982` (the P5 merge). Its migration is **`0008_verification.sql`**. Hosted has **0001–0008**
-(0008 pushed 2026-09-25 with the owner's explicit approval, "0008 only", and verified read-only).
-Decisions: [ADR 0007](decisions/0007-p6-verification-loop.md). **P7 will be migration `0009`.**
-**Status: COMPLETE ON THE BRANCH. Local acceptance PASS; hosted migration 0008 PASS; hosted real
+**Current phase: P7 + P8 — Teacher/Admin + Benchmark/Hardening.** Branch
+`skillmirror-p7-p8-teacher-admin-hardening` from `main` `4a648ac` (the P6 merge). Hosted has
+**0001–0008**. **P7 is migration `0009_teacher_admin_ops.sql`**; it is pushed to hosted only after
+the owner's explicit approval. **P8 (benchmark + hardening) follows P7** and needs no migration of
+its own (its storage, `benchmark_runs`, is part of 0009).
+**Status: IN PROGRESS.**
+
+### Previous phase: P6 (merged in PR #6, `4a648ac`)
+
+**P6 — Verification Loop.** Branch `skillmirror-p6-verification-loop` from `main`
+`a0e6982` (the P5 merge), merged in PR #6 as `4a648ac`. Its migration is
+**`0008_verification.sql`**. Hosted has **0001–0008** (0008 pushed 2026-09-25 with the owner's
+explicit approval, "0008 only", and verified read-only).
+Decisions: [ADR 0007](decisions/0007-p6-verification-loop.md).
+**Status: COMPLETE and MERGED. Local acceptance PASS; hosted migration 0008 PASS; hosted real
 acceptance PASS on `gemini-3.5-flash-lite` (1 generation, 0 evaluation, 0 embedding requests) —
-the REAL LIVE PROOF case (see *Hosted acceptance P6*). Pull request open, not merged.**
+the REAL LIVE PROOF case (see *Hosted acceptance P6*). The PR-triggered CI on the PR #6 head
+passed.**
 
 ```
 VERIFY / REVERIFY recommendation -> planner (no model call) -> PLANNED -> 1 VERIFICATION_GENERATION
@@ -72,7 +84,7 @@ VERIFY / REVERIFY recommendation -> planner (no model call) -> PLANNED -> 1 VERI
 | Hosted migration 0008 | **PASS**: pushed with the owner's approval; catalog, RLS, grants, dropped P4-era constraint, triggers, functions, indexes, checks, policy key and unchanged rows verified | See *Database* |
 | Hosted real acceptance (1 Flash-Lite generation, 0 evaluation, 0 embedding) | **PASS**: 12/12 + browser walkthrough; **REAL LIVE PROOF** (the live pass alone met every VERIFIED gate; no evidence was added after it) | See *Hosted acceptance P6* |
 | Real P3B/P4 learner untouched | PASS | Row hash `07a84e5a…` identical before the push, after verify and after cleanup |
-| CI + pull request | on the pushed branch head; the PR is opened after CI is green and not merged by the agent | — |
+| CI + pull request | **PASS**: PR #6, CI green on its head `583aea4`; merged by the owner as `4a648ac` | — |
 
 ### Previous phase: P5 (merged in PR #5, `a0e6982`)
 
@@ -305,7 +317,8 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - a cache lookup index and a provider-request (budget) index
 - **Migration numbering:** `0004` is the free-tier ModelGateway/cache optimisation; P3B is
   `0005` and P4 is `0006`. **P5 (feedback + recommendations) is `0007`; P6 verification is
-  `0008`; P7 will be `0009`.**
+  `0008`; P7 is `0009_teacher_admin_ops.sql` (local only until the owner approves the push); P8
+  needs no migration.**
 - Hosted: **`0001`–`0008` applied.**
   - **Migration 0008** was pushed on 2026-09-25 with the owner's explicit approval ("Approved:
     0008 only"), with `npx supabase@2.117.0 db push --linked`.
@@ -994,10 +1007,13 @@ auth round trip.
 
 ## Exact next action
 
-1. **Owner: review and merge the P6 pull request** (`skillmirror-p6-verification-loop` → `main`).
-   The agent does not merge and does not start P7/P8.
-2. **After the merge: P7** on a new branch from the P6 merge commit. Its migration will be
-   **`0009`**, applied to hosted only with the owner's explicit approval.
+1. **P7 + P8** on `skillmirror-p7-p8-teacher-admin-hardening` (from the P6 merge `4a648ac`):
+   implement and locally validate migration **`0009_teacher_admin_ops.sql`**, then **stop before
+   `supabase db push --linked`** and wait for the owner's explicit approval. After approval: push
+   0009 only, verify hosted, run the P7 hosted acceptance, then the P8 benchmark (deterministic
+   120/120, replay set, bounded Flash-Lite live set) and hardening; one PR into `main`, not merged;
+   P9 is not started.
+2. *(Done: PR #6 merged as `4a648ac`.)*
 3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
    - one live free-text verification (1 generation + 1 evaluation) to exercise
      `verification-evaluation/v1` live
