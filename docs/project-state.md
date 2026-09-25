@@ -24,13 +24,15 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0 and P1 are merged. |
+| Default branch | `main`. P0, P1 and P2 + P3A are merged. **`main` = `08260a397fb5b41d709b3c4074836cc7e21646da`** (merge of PR #3). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
-| Development branch | `skillmirror-p2-p3a-intelligence-foundation` |
+| P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
+| Development branch | `skillmirror-p3b-p4-evidence-mastery-debt` (P3B + P4, from `08260a3`) |
+| Previous branch | `skillmirror-p2-p3a-intelligence-foundation` |
 | Started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | Commits | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
 | CI | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P2 + P3A → `main`, opened once CI on the final commit is green; **not merged** |
+| Pull request | P2 + P3A → `main`: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
@@ -374,8 +376,7 @@ auth round trip.
 
 ## Exact next action
 
-1. **Pull request.** Review and merge the P2 + P3A pull request (`skillmirror-p2-p3a-intelligence-foundation`
-   → `main`) once its CI is green. It is not merged by the agent.
+1. **Pull request.** Done: PR #3 (P2 + P3A) is merged; `main` = `08260a397fb5b41d709b3c4074836cc7e21646da`.
 2. **`gemini-3.7-flash` live validation**, when Google's capacity allows. Run it on a day with
    quota and no 503 spike: avoid the first hour after midnight Pacific.
    - **The pending work is done**, so create a fresh course through `/courses/new` or the script
