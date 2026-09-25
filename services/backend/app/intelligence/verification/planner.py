@@ -17,9 +17,13 @@ A recommended skill is planned when it has no active verification and is not coo
     a pipeline failure within retry_after_generation_failure_hours           -> skip
 
 and within the learner's daily burden: at most `max_daily_unsolicited` sessions per learner-day
-(Appendix B: 2), counted over every session planned that day in any state. The learner's day is
-their `profiles.timezone` when it is a valid IANA zone, else UTC. Candidates are taken by
-recommendation priority, then course importance, then skill id.
+(Appendix B: 2), counted over every session planned that day in any state - except a session the
+learner never started whose skill no longer has an ACTIVE VERIFY / REVERIFY recommendation (P9,
+`NOT_NEEDED`): it is not a current check, is never shown as one, and so is no burden. It still
+occupies its skill (the one-open-session index), so that skill is not planned twice; should the
+skill be recommended for verification again, that same session is the current check again. The
+learner's day is their `profiles.timezone` when it is a valid IANA zone, else UTC. Candidates are
+taken by recommendation priority, then course importance, then skill id.
 
 Each plan is a PLANNED session plus one GENERATE_VERIFICATION job, in one transaction under the
 learner's `verification:{learner}` lock, so a repeated or concurrent planner run creates nothing
@@ -44,10 +48,21 @@ from app.intelligence.policy import (
 )
 from app.jobs.queue import JOB_GENERATE_VERIFICATION, JOB_GRADE_VERIFICATION, enqueue_job
 
-PLANNER_VERSION = "verification-planner/p6-v1"
+# p9-v1: a not-started session whose skill lost its VERIFY / REVERIFY is no daily burden.
+PLANNER_VERSION = "verification-planner/p9-v1"
 ENTITY_TYPE = "verification_session"
 ACTIVE_STATES = ("PLANNED", "READY", "IN_PROGRESS", "SUBMITTED")
 STALE_ABANDON_REASON = "INACTIVE_TIMEOUT"
+
+# SQL predicate over a verification session `s`: the learner's skill currently has an ACTIVE
+# VERIFY / REVERIFY recommendation, i.e. SkillMirror still asks for a check of it. A session that
+# was never started (PLANNED / READY, no failure) without it is NOT_NEEDED: history, not a check.
+SKILL_NEEDS_CHECK_SQL = """exists (
+    select 1 from public.recommendations nr
+     where nr.learner_id = s.learner_id and nr.skill_id = s.skill_id
+       and nr.state = 'ACTIVE' and nr.type in ('VERIFY', 'REVERIFY'))"""
+NOT_NEEDED_SQL = f"""(s.state in ('PLANNED', 'READY') and s.failure_code is null
+    and not {SKILL_NEEDS_CHECK_SQL})"""
 
 
 @dataclass(frozen=True)
@@ -219,7 +234,8 @@ def plan_verifications(
         zone, zone_name = learner_timezone(profile[0] if profile else None)
         day = now.astimezone(zone).date()
         (planned_today,) = conn.execute(
-            "select count(*) from public.verification_sessions where learner_id = %s and plan_day = %s",
+            "select count(*) from public.verification_sessions s "  # noqa: S608 - constant SQL
+            f"where s.learner_id = %s and s.plan_day = %s and not {NOT_NEEDED_SQL}",
             (learner_id, day),
         ).fetchone()
         report = PlanReport(day, zone_name, int(planned_today), planner.max_daily_unsolicited)

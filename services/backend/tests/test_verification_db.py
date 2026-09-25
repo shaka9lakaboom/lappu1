@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import pytest
 
+from app.experience.feedback import submit_feedback
+from app.experience.models import FeedbackRequest
 from app.intelligence.mastery.ledger import recompute_ledger
 from app.intelligence.policy import load_policy
 from app.intelligence.recommendations.service import refresh_recommendations
@@ -28,7 +30,7 @@ from app.model_gateway import ProviderError, QuotaPolicy, RequestBudget
 from app.model_gateway.recorder import DbModelRunRecorder
 from tests.conftest import api_client, job_for
 from tests.fakes import FakeProvider, challenge, evaluation, route_responder
-from tests.p6_fixtures import graded_verification, seed_p6_learner
+from tests.p6_fixtures import delegation_turn, graded_verification, seed_p6_learner, seed_turns
 from tests.test_courses_api import auth
 from tests.test_pipeline_db import cached_gateway_for, fetch
 
@@ -937,3 +939,177 @@ def test_duplicate_grading_jobs_are_harmless(db_pool, seeded, client, make_token
             job_for(db_pool, session, JOB_GRADE_VERIFICATION),
         )
     assert counts(db_pool, learner) == {"sessions": 1, "items": 1, "results": 1, "evidence": 1}
+
+
+# --- P9: a check whose reason is gone (skill-scoped current check) ------------------------------
+#
+# The hosted case of 2026-09-25: a READY check was planned from a VERIFY that a later recompute
+# superseded (the debt behind it was false). The session is history, not a current check; nothing
+# is written to it; and the one-open-session rule may never hide a check the learner is asked for.
+
+
+NEW_DELEGATION = "SELECT c.name, o.id FROM c LEFT JOIN o ON o.cid = c.id -- p9 {n}"
+
+
+def correct_delegations_until_no_check(pool, learner, skill) -> None:
+    """DONT_COUNT the skill's AI delegations one at a time until the skill no longer has a VERIFY
+    (each correction recomputes the ledger and refreshes the queue, as in the product)."""
+    with pool.connection() as conn:
+        policy = load_policy(conn)
+        delegations = [
+            r[0]
+            for r in conn.execute(
+                "select id from public.evidence_events where learner_id = %s and skill_id = %s "
+                "and evidence_type = 'OBSERVATION' and not excluded order by occurred_at",
+                (learner, skill),
+            ).fetchall()
+        ]
+        for evidence_id in delegations:
+            submit_feedback(
+                conn,
+                learner,
+                FeedbackRequest(
+                    action="DONT_COUNT", target_type="EVIDENCE_EVENT", target_id=evidence_id
+                ),
+                f"p9-{uuid4().hex}",
+                policy=policy,
+            )
+            (current,) = conn.execute(
+                "select type::text from public.recommendations "
+                "where learner_id = %s and skill_id = %s and state = 'ACTIVE'",
+                (learner, skill),
+            ).fetchone()
+            if current not in ("VERIFY", "REVERIFY"):
+                conn.commit()
+                return
+    raise AssertionError("the VERIFY recommendation never went away")
+
+
+def session_row(pool, session):
+    return fetch(
+        pool,
+        "select to_jsonb(s)::text from public.verification_sessions s where s.id = %s",
+        session,
+    )[0][0]
+
+
+def test_a_ready_check_with_an_active_verify_is_a_current_check(
+    db_pool, seeded, client, make_token
+):
+    learner, skill = seeded.learner_id, seeded.skills["left_join"]
+    token = make_token(learner)
+    session = ready_session(db_pool, seeded, client, token)
+    rec_id, rec_type, _ = active_recommendation(db_pool, learner, skill)
+    body = verifications(client, token)
+    assert rec_type == "VERIFY"
+    assert [(s["id"], s["status"]) for s in body["ready"]] == [(str(session), "READY")]
+    assert body["ready"][0]["recommendation_id"] == str(rec_id) and body["not_needed"] == []
+    assert body["budget"]["planned_today"] == 1 and body["budget"]["remaining_today"] == 1
+    (rec,) = [
+        r
+        for r in client.get(
+            f"/v1/recommendations?course_id={seeded.course_id}", headers=auth(token)
+        ).json()["recommendations"]
+        if r["skill_id"] == str(skill)
+    ]
+    assert rec["type"] == "VERIFY" and rec["verification_session_id"] == str(session)
+    assert client.post(f"/v1/verifications/{session}/start", headers=auth(token)).status_code == 200
+
+
+def test_a_ready_check_whose_verify_was_superseded_is_history_not_a_check(
+    db_pool, seeded, client, make_token
+):
+    learner, skill = seeded.learner_id, seeded.skills["left_join"]
+    token = make_token(learner)
+    session = ready_session(db_pool, seeded, client, token)
+    rec_id, *_ = active_recommendation(db_pool, learner, skill)
+    correct_delegations_until_no_check(db_pool, learner, skill)
+    (old_state,) = fetch(
+        db_pool, "select state::text from public.recommendations where id = %s", rec_id
+    )
+    assert old_state == ("SUPERSEDED",)
+    stored = session_row(db_pool, session)
+
+    body = verifications(client, token)
+    assert body["ready"] == [] and body["in_progress"] == [] and body["preparing"] == []
+    (history,) = body["not_needed"]
+    assert history["id"] == str(session) and history["status"] == "NOT_NEEDED"
+    assert history["state"] == "READY" and history["recommendation_id"] == str(rec_id)
+    # Planned today, but not a current check: it is no burden and does not use today's budget.
+    assert body["budget"]["planned_today"] == 0 and body["budget"]["remaining_today"] == 2
+    # Still readable (history is preserved) ...
+    detail = client.get(f"/v1/verifications/{session}", headers=auth(token))
+    assert detail.status_code == 200 and detail.json()["session"]["status"] == "NOT_NEEDED"
+    assert detail.json()["challenge"] is None
+    # ... never offered as an action, and it cannot be started.
+    recs = client.get(
+        f"/v1/recommendations?course_id={seeded.course_id}", headers=auth(token)
+    ).json()["recommendations"]
+    assert all(r["verification_session_id"] is None for r in recs)
+    assert not [r for r in recs if r["type"] in ("VERIFY", "REVERIFY")]
+    started = client.post(f"/v1/verifications/{session}/start", headers=auth(token))
+    assert started.status_code == 409 and "no longer needed" in started.json()["detail"]
+    # Nothing was written to the session: no lifecycle change, provenance kept as it was.
+    assert session_row(db_pool, session) == stored
+    assert sessions(db_pool, learner)[0][2] == "READY"
+
+
+def test_a_not_needed_check_is_the_current_check_again_when_the_skill_needs_one(
+    db_pool, seeded, client, make_token
+):
+    """No deadlock: the old READY session occupies the skill (one open session per skill), so a
+    genuinely new VERIFY of that skill makes the SAME session the current check again."""
+    learner, skill = seeded.learner_id, seeded.skills["left_join"]
+    token = make_token(learner)
+    session = ready_session(db_pool, seeded, client, token)
+    old_rec, *_ = active_recommendation(db_pool, learner, skill)
+    correct_delegations_until_no_check(db_pool, learner, skill)
+    assert verifications(client, token)["not_needed"][0]["id"] == str(session)
+
+    # New, uncorrected delegations of the same skill: the debt is actionable again.
+    with db_pool.connection() as conn:
+        policy = load_policy(conn)
+    plan = [(skill, delegation_turn(NEW_DELEGATION.format(n=n), n)) for n in range(8)]
+    seed_turns(db_pool, learner, plan, policy=policy, now=datetime.now(UTC))
+    with db_pool.connection() as conn:
+        recompute_ledger(conn, learner, [skill], policy=policy)
+        refresh_recommendations(conn, learner, policy=policy)
+    new_rec, new_type, _ = active_recommendation(db_pool, learner, skill)
+    assert new_type == "VERIFY" and new_rec != old_rec
+
+    body = verifications(client, token)
+    assert [(s["id"], s["status"]) for s in body["ready"]] == [(str(session), "READY")]
+    assert body["not_needed"] == [] and len(sessions(db_pool, learner)) == 1
+    with db_pool.connection() as conn:
+        report = plan_verifications(conn, learner, policy=policy)
+    assert report.created == [] and report.skipped[str(skill)] == "ACTIVE_SESSION"
+    (rec,) = [
+        r
+        for r in client.get("/v1/recommendations", headers=auth(token)).json()["recommendations"]
+        if r["skill_id"] == str(skill)
+    ]
+    assert rec["verification_session_id"] == str(session)
+    assert client.post(f"/v1/verifications/{session}/start", headers=auth(token)).status_code == 200
+
+
+def test_a_started_check_stays_resumable_and_its_result_is_history(
+    db_pool, seeded, client, make_token
+):
+    learner, skill = seeded.learner_id, seeded.skills["left_join"]
+    token = make_token(learner)
+    session = ready_session(db_pool, seeded, client, token)
+    first = client.post(f"/v1/verifications/{session}/start", headers=auth(token)).json()
+    correct_delegations_until_no_check(db_pool, learner, skill)
+
+    body = verifications(client, token)
+    assert [(s["id"], s["status"]) for s in body["in_progress"]] == [(str(session), "IN_PROGRESS")]
+    assert body["not_needed"] == [] and body["ready"] == []
+    resumed = client.post(f"/v1/verifications/{session}/start", headers=auth(token)).json()
+    assert resumed["challenge"]["item_id"] == first["challenge"]["item_id"]  # IN_PROGRESS resumes
+    assert submit(client, token, session, {"selected": ["B"]}).status_code == 202
+    drain(db_pool, FakeProvider())
+
+    body = verifications(client, token)
+    assert [(s["id"], s["status"]) for s in body["completed"]] == [(str(session), "PASSED")]
+    assert body["in_progress"] == [] and body["not_needed"] == []
+    assert counts(db_pool, learner)["evidence"] == 1  # the VERIFICATION evidence of the pass

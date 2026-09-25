@@ -374,6 +374,8 @@ VerificationStatus = Literal[
     "PARTIAL",
     "NOT_PASSED",
     "ABANDONED",
+    # P9: never started, and the skill no longer has a VERIFY / REVERIFY recommendation.
+    "NOT_NEEDED",
 ]
 
 
@@ -472,6 +474,8 @@ class VerificationsResponse(_Out):
     completed: list[VerificationSessionSummary]
     # Not issued, needs review, abandoned: closed without a learner result.
     closed: list[VerificationSessionSummary]
+    # P9: never started and no longer asked for (history only; not a current check).
+    not_needed: list[VerificationSessionSummary]
 
 
 class VerificationSubmissionRequest(BaseModel):

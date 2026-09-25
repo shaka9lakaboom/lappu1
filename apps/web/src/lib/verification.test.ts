@@ -6,6 +6,7 @@ import { recommendation, verificationChallenge, verificationQueue, verificationS
 import {
   STATUS,
   buildSubmission,
+  currentCheckCount,
   isWaiting,
   responseText,
   triggerText,
@@ -40,6 +41,22 @@ describe('verification statuses', () => {
     expect(triggerText(verificationSession())).toContain('repeatedly done this skill for you');
     expect(triggerText(verificationSession({ reason_code: 'VERIFICATION_STALE' }))).toContain('a while ago');
     expect(triggerText(verificationSession({ reason_code: 'VERIFICATION_CONTRADICTED' }))).toContain('disagree');
+  });
+
+  it('shows a check whose reason is gone as neutral history, never as a check to do (P9)', () => {
+    expect(STATUS.NOT_NEEDED.label).toBe('No longer needed');
+    expect(STATUS.NOT_NEEDED.tone).toBe('neutral');
+    expect(STATUS.NOT_NEEDED.detail).toContain('nothing to do');
+    const stale = verificationSession({ state: 'READY', status: 'NOT_NEEDED' });
+    const queue = verificationQueue({ not_needed: [stale] });
+    expect(currentCheckCount(queue)).toBe(0);
+    expect(isWaiting(queue)).toBe(false);
+    const live = verificationQueue({
+      ready: [verificationSession()],
+      in_progress: [verificationSession({ state: 'IN_PROGRESS', status: 'IN_PROGRESS' })],
+      not_needed: [stale],
+    });
+    expect(currentCheckCount(live)).toBe(2); // READY + resumable IN_PROGRESS, never the stale one
   });
 
   it('refreshes the page only while generation or grading is running', () => {

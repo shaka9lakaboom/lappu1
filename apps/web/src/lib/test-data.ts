@@ -279,7 +279,7 @@ export function verificationChallenge(overrides: Partial<VerificationChallenge> 
 
 export function verificationQueue(overrides: Partial<VerificationsResponse> = {}): VerificationsResponse {
   return {
-    planner_version: 'verification-planner/p6-v1',
+    planner_version: 'verification-planner/p9-v1',
     budget: { day: '2026-09-25', timezone: 'UTC', daily_limit: 2, planned_today: 1, remaining_today: 1 },
     preparing: [],
     ready: [],
@@ -287,6 +287,7 @@ export function verificationQueue(overrides: Partial<VerificationsResponse> = {}
     pending: [],
     completed: [],
     closed: [],
+    not_needed: [],
     ...overrides,
   };
 }

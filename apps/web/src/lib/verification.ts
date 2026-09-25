@@ -6,6 +6,8 @@
  * - Incomplete is not failure: a check that was stopped, or could not be prepared or graded,
  *   is never shown as a wrong answer.
  * - The answer key never reaches the browser before grading (the API does not send it).
+ * - A check the learner is no longer asked for (NOT_NEEDED: its skill lost the VERIFY / REVERIFY
+ *   recommendation) is history: never a ready check, never a required action, never in a count.
  */
 import type {
   Recommendation,
@@ -63,7 +65,18 @@ export const STATUS: Record<VerificationStatus, { label: string; tone: Tone; det
     tone: 'neutral',
     detail: 'You stopped this check. An unfinished check never counts against you.',
   },
+  NOT_NEEDED: {
+    label: 'No longer needed',
+    tone: 'neutral',
+    detail:
+      'SkillMirror suggested this check earlier, but no longer needs it: the reason for it has gone. There is nothing to do; it stays here for your records.',
+  },
 };
+
+/** Current checks: what the learner may be asked to do now (never a NOT_NEEDED session). */
+export function currentCheckCount(response: Pick<VerificationsResponse, 'ready' | 'in_progress'>): number {
+  return response.ready.length + response.in_progress.length;
+}
 
 export const ASSESSMENT_LABEL: Record<VerificationAssessmentType, string> = {
   mcq: 'Multiple choice',

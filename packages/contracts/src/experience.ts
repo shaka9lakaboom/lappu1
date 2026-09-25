@@ -319,6 +319,8 @@ export const VERIFICATION_STATUSES = [
   'PARTIAL',
   'NOT_PASSED',
   'ABANDONED',
+  /** P9: never started, and the skill no longer has a VERIFY / REVERIFY recommendation. */
+  'NOT_NEEDED',
 ] as const;
 export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 
@@ -411,6 +413,8 @@ export interface VerificationsResponse {
   pending: VerificationSessionSummary[];
   completed: VerificationSessionSummary[];
   closed: VerificationSessionSummary[];
+  /** P9: never started and no longer asked for - history, not a current check. */
+  not_needed: VerificationSessionSummary[];
 }
 
 /** Body of POST /v1/verifications/{id}/submit (send an Idempotency-Key header). */

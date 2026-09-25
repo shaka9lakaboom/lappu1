@@ -29,6 +29,19 @@ describe('Verification Center', () => {
     expect(markup).not.toMatch(/red-|destructive/);
   });
 
+  it('shows a READY check whose VERIFY was superseded as history without an action (P9)', () => {
+    const markup = html(<SessionCard session={verificationSession({ state: 'READY', status: 'NOT_NEEDED' })} />);
+    expect(markup).toContain('data-status="NOT_NEEDED"');
+    expect(markup).toContain('No longer needed');
+    expect(markup).toContain('data-tone="neutral"');
+    expect(markup).not.toContain('data-testid="verification-open"');
+    expect(markup).not.toContain('repeatedly done this skill for you');
+    // A resumable IN_PROGRESS check keeps its action.
+    const started = html(<SessionCard session={verificationSession({ state: 'IN_PROGRESS', status: 'IN_PROGRESS' })} />);
+    expect(started).toContain('data-testid="verification-open"');
+    expect(started).toContain('Continue');
+  });
+
   it('labels the status with its tone', () => {
     expect(html(<StatusBadge session={{ status: 'PASSED' }} />)).toContain('data-tone="emerald"');
     expect(html(<StatusBadge session={{ status: 'EVALUATING' }} />)).toContain('Checking your answer');

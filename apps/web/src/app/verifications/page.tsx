@@ -8,7 +8,7 @@ import { SessionCard } from '@/components/verification/session-card';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiError, apiRequest } from '@/lib/api';
 import { requireApiSession } from '@/lib/session';
-import { isWaiting } from '@/lib/verification';
+import { STATUS, currentCheckCount, isWaiting } from '@/lib/verification';
 
 function Group({
   title,
@@ -51,7 +51,7 @@ export default async function VerificationCenterPage() {
       </main>
     );
   }
-  const open = queue.ready.length + queue.in_progress.length;
+  const open = currentCheckCount(queue);
   const nothing =
     open === 0 && queue.preparing.length === 0 && queue.pending.length === 0 && queue.completed.length === 0;
 
@@ -109,6 +109,19 @@ export default async function VerificationCenterPage() {
         sessions={queue.closed}
         testId="verifications-closed"
       />
+      {queue.not_needed.length > 0 ? (
+        <details className="rounded-lg border p-4 text-sm" data-testid="verifications-not-needed">
+          <summary className="cursor-pointer font-medium">
+            No longer needed ({queue.not_needed.length})
+          </summary>
+          <p className="mt-2 text-muted-foreground">{STATUS.NOT_NEEDED.detail}</p>
+          <div className="mt-2 divide-y">
+            {queue.not_needed.map((session) => (
+              <SessionCard key={session.id} session={session} />
+            ))}
+          </div>
+        </details>
+      ) : null}
     </main>
   );
 }

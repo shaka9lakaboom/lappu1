@@ -35,10 +35,15 @@ export default async function VerificationPage({ params }: PageProps<'/verificat
   }
   const { session, challenge } = detail;
   const waiting = session.status === 'PREPARING' || session.status === 'EVALUATING';
+  const notNeeded = session.status === 'NOT_NEEDED';
 
   return (
     <main className="mx-auto max-w-3xl space-y-6 px-4 py-10 sm:px-6" data-testid="verification-page" data-state={session.state}>
-      <AppHeader current="/verifications" title={`Check: ${session.canonical_name}`} description={triggerText(session)}>
+      <AppHeader
+        current="/verifications"
+        title={`Check: ${session.canonical_name}`}
+        description={notNeeded ? 'Suggested earlier; no longer needed.' : triggerText(session)}
+      >
         <StatusBadge session={session} />
       </AppHeader>
       {waiting ? <AutoRefresh intervalMs={3000} /> : null}
@@ -53,7 +58,7 @@ export default async function VerificationPage({ params }: PageProps<'/verificat
         </Link>
       </p>
 
-      {session.state === 'READY' ? (
+      {session.status === 'READY' ? (
         <Card>
           <CardHeader>
             <CardTitle>Ready when you are</CardTitle>

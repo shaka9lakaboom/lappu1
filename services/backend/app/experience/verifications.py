@@ -3,10 +3,20 @@
     GET  /v1/verifications             refresh the recommendation queue -> deterministic planner
                                        (PLANNED sessions + generation jobs) -> the learner's queue
     GET  /v1/verifications/{id}        one session; the sanitized challenge once started
-    POST /v1/verifications/{id}/start  READY -> IN_PROGRESS; on IN_PROGRESS it resumes (no change)
+    POST /v1/verifications/{id}/start  READY -> IN_PROGRESS; on IN_PROGRESS it resumes (no change);
+                                       a NOT_NEEDED check is refused (409)
     POST /v1/verifications/{id}/submit Idempotency-Key: validate -> store the response durably ->
                                        SUBMITTED -> enqueue grading -> return (grading is async)
     POST /v1/verifications/{id}/abandon IN_PROGRESS -> ABANDONED (no result, no evidence)
+
+A current check is a session whose skill SkillMirror still asks to verify: the skill has an
+ACTIVE VERIFY / REVERIFY recommendation (P9, skill-scoped). A session the learner never started
+(PLANNED / READY) whose skill lost that recommendation - e.g. the debt behind it was corrected -
+is NOT_NEEDED: kept and readable as history, never listed as a ready check, never counted in the
+daily budget, and it cannot be started. Nothing is written to it (no lifecycle change); if the
+skill is recommended for verification again, the same session is the current check again, so the
+one-open-session rule can never hide a check the learner is asked to do. Started sessions
+(IN_PROGRESS) stay resumable whatever happened to the recommendation.
 
 Every read and write is scoped to the authenticated learner explicitly (never RLS alone): a
 foreign session is 404. The answer key and rubric never leave the server; a learner's answer is
@@ -45,6 +55,7 @@ from app.intelligence.verification.graders import (
 from app.intelligence.verification.planner import (
     ENTITY_TYPE,
     PLANNER_VERSION,
+    SKILL_NEEDS_CHECK_SQL,
     plan_verifications,
 )
 from app.jobs.queue import JOB_GRADE_VERIFICATION, enqueue_job
@@ -83,7 +94,7 @@ select s.id, s.skill_id, n.canonical_name, s.course_id, s.state::text, s.trigger
        i.estimated_minutes, s.failure_code, s.abandon_reason, s.created_at, s.ready_at,
        s.started_at, s.submitted_at, s.evaluated_at, s.abandoned_at,
        r.id, r.score, r.pass, r.outcome_signal::text, r.feedback, r.grading_confidence,
-       r.evaluator_type::text, r.evaluation, r.created_at, e.id
+       r.evaluator_type::text, r.evaluation, r.created_at, e.id, {needed}
   from public.verification_sessions s
   join public.skill_nodes n on n.id = s.skill_id
   left join public.verification_items i on i.session_id = s.id
@@ -92,10 +103,14 @@ select s.id, s.skill_id, n.canonical_name, s.course_id, s.state::text, s.trigger
  where s.learner_id = %(learner)s and (%(session)s::uuid is null or s.id = %(session)s::uuid)
  order by s.created_at desc, s.id
  limit %(limit)s
-"""
+""".replace("{needed}", SKILL_NEEDS_CHECK_SQL)
 
 
-def status_of(state: str, failure_code: str | None, outcome_signal: str | None) -> str:
+def status_of(
+    state: str, failure_code: str | None, outcome_signal: str | None, needed: bool = True
+) -> str:
+    if state in ("PLANNED", "READY") and failure_code is None and not needed:
+        return "NOT_NEEDED"  # never started, and its skill no longer asks for a check
     if state == "PLANNED":
         return "NOT_ISSUED" if failure_code else "PREPARING"
     if state == "SUBMITTED":
@@ -130,7 +145,7 @@ def _summary(r: tuple) -> VerificationSessionSummary:
         canonical_name=r[2],
         course_id=r[3],
         state=r[4],
-        status=status_of(r[4], r[11], r[22]),
+        status=status_of(r[4], r[11], r[22], bool(r[29])),
         trigger_type=r[5],
         reason_code=r[6],
         recommendation_id=r[7],
@@ -171,6 +186,7 @@ def list_verifications(
         "pending": [],
         "completed": [],
         "closed": [],
+        "not_needed": [],
     }
     group_of = {
         "PREPARING": "preparing",
@@ -180,6 +196,7 @@ def list_verifications(
         "PASSED": "completed",
         "PARTIAL": "completed",
         "NOT_PASSED": "completed",
+        "NOT_NEEDED": "not_needed",
     }
     for session in _sessions(conn, learner_id):
         groups[group_of.get(session.status, "closed")].append(session)
@@ -274,9 +291,15 @@ def _lock(conn: Connection, learner_id: UUID, session_id: UUID) -> tuple:
 def start_verification(
     conn: Connection, learner_id: UUID, session_id: UUID, *, policy: IntelligencePolicy
 ) -> VerificationDetailResponse:
-    """READY -> IN_PROGRESS. Calling it again on IN_PROGRESS resumes the same challenge."""
+    """READY -> IN_PROGRESS. Calling it again on IN_PROGRESS resumes the same challenge. A READY
+    session whose skill no longer asks for a check (NOT_NEEDED) is not started."""
     with conn.transaction():
         state, *_ = _lock(conn, learner_id, session_id)
+        if state == "READY" and not _skill_needs_check(conn, session_id):
+            raise VerificationStateError(
+                "This check is no longer needed: SkillMirror no longer suggests checking "
+                "this skill."
+            )
         if state == "READY":
             conn.execute(
                 "update public.verification_sessions set state = 'IN_PROGRESS', started_at = now() "
@@ -286,6 +309,14 @@ def start_verification(
         elif state != "IN_PROGRESS":
             raise VerificationStateError(f"This check cannot be started: it is {state}.")
     return get_verification(conn, learner_id, session_id, policy=policy)
+
+
+def _skill_needs_check(conn: Connection, session_id: UUID) -> bool:
+    (needed,) = conn.execute(
+        f"select {SKILL_NEEDS_CHECK_SQL} from public.verification_sessions s where s.id = %s",  # noqa: S608
+        (session_id,),
+    ).fetchone()
+    return bool(needed)
 
 
 def request_hash(session_id: UUID, request: VerificationSubmissionRequest) -> str:
