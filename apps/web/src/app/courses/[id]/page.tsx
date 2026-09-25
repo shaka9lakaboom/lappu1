@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 import { AutoRefresh } from '@/components/auto-refresh';
+import { GraphWaitNotice } from '@/components/graph-wait-notice';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ApiError, apiRequest } from '@/lib/api';
 import { graphStatusLabel, groupSkillsByTopic, importanceLabel, isGraphInProgress, prerequisiteNames } from '@/lib/courses';
@@ -73,10 +74,10 @@ export default async function CoursePage({ params }: PageProps<'/courses/[id]'>)
               {course.graph_error ?? 'Generation failed.'}
             </p>
           ) : inProgress ? (
-            <p className="text-muted-foreground">
-              This page updates automatically.
-              {course.graph_error ? ` Last attempt: ${course.graph_error}` : null}
-            </p>
+            <div className="space-y-1 text-muted-foreground">
+              <GraphWaitNotice course={course} />
+              <p>This page updates automatically.</p>
+            </div>
           ) : null}
         </CardContent>
       </Card>

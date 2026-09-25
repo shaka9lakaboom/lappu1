@@ -7,6 +7,7 @@ Every read is scoped to the authenticated learner's memberships.
 """
 
 from dataclasses import dataclass
+from datetime import datetime
 from uuid import UUID
 
 from psycopg import Connection
@@ -42,6 +43,10 @@ select c.id, c.name, c.subject, c.level, c.description, c.status::text, c.graph_
          where cs.course_id = c.id and cs.active and n.node_kind in ('SKILL', 'SUBSKILL')),
        (select j.state::text from public.processing_jobs j
          where j.entity_id = c.id and j.job_type = 'BOOTSTRAP_COURSE_GRAPH'),
+       (select j.outcome from public.processing_jobs j
+         where j.entity_id = c.id and j.job_type = 'BOOTSTRAP_COURSE_GRAPH'),
+       (select j.available_at from public.processing_jobs j
+         where j.entity_id = c.id and j.job_type = 'BOOTSTRAP_COURSE_GRAPH'),
        c.created_at, c.updated_at
   from public.courses c
   join public.course_memberships m
@@ -49,7 +54,42 @@ select c.id, c.name, c.subject, c.level, c.description, c.status::text, c.graph_
 """
 
 
+# Outcomes of a deferral that did not spend an attempt (app/jobs/worker.py).
+_WAIT_OUTCOMES = frozenset({"MODEL_BACKPRESSURE", "MODEL_BUDGET_RESERVE"})
+
+# Stored bootstrap errors are "<ExceptionClass>: <message>" (app/jobs/worker.py) or the stale
+# lock recovery note. Only these fixed summaries leave the API.
+_PUBLIC_GRAPH_ERRORS = {
+    "ModelOutputInvalidError": "The AI returned a skill graph that did not pass validation.",
+    "ModelTimeoutError": "The AI provider did not answer in time.",
+    "ModelUnavailableError": "The AI provider was unavailable.",
+    "ModelRateLimitedError": "The AI provider refused the request.",
+    "ModelCallError": "The AI provider request failed.",
+    "worker lock expired": "The worker stopped while generating this skill graph.",
+}
+_PUBLIC_GRAPH_ERROR_DEFAULT = "An internal error interrupted skill graph generation."
+
+
+def public_graph_error(error: str | None) -> str | None:
+    if not error:
+        return None
+    return _PUBLIC_GRAPH_ERRORS.get(error.split(":", 1)[0].strip(), _PUBLIC_GRAPH_ERROR_DEFAULT)
+
+
+def bootstrap_wait(
+    job_state: str | None, outcome: str | None, available_at: datetime | None
+) -> tuple[str | None, datetime | None]:
+    """(wait reason, next attempt due) of a bootstrap job that is queued or waits for a retry.
+    A queued job without a reason is simply due; a running or finished one has neither."""
+    if job_state == "RETRY_WAIT":
+        return "RETRY_AFTER_ERROR", available_at
+    if job_state == "PENDING":
+        return (outcome if outcome in _WAIT_OUTCOMES else None), available_at
+    return None, None
+
+
 def _course(row: tuple) -> Course:
+    wait_reason, next_attempt_at = bootstrap_wait(row[13], row[14], row[15])
     return Course(
         id=row[0],
         name=row[1],
@@ -59,14 +99,16 @@ def _course(row: tuple) -> Course:
         status=row[5],
         graph_status=row[6],
         graph_version=row[7],
-        graph_error=row[8],
+        graph_error=public_graph_error(row[8]),
         graph_generated_at=row[9],
         role=row[10],
         is_owner=row[11],
         skill_count=row[12],
         bootstrap_job_state=row[13],
-        created_at=row[14],
-        updated_at=row[15],
+        bootstrap_wait_reason=wait_reason,
+        bootstrap_next_attempt_at=next_attempt_at,
+        created_at=row[16],
+        updated_at=row[17],
     )
 
 

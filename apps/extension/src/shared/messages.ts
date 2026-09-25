@@ -11,6 +11,7 @@
  */
 import type { UnboundEnvelope } from '../capture/CaptureManager';
 import type { CaptureState } from '../capture/CaptureManager';
+import type { CaptureStatus } from '../content/captureStatus';
 import type { LastSync } from '../background/sync';
 
 export interface GetStatusRequest {
@@ -71,6 +72,10 @@ export interface ContentStatusResponse {
   provider: 'chatgpt';
   state: CaptureState;
   conversationDetected: boolean;
+  /** Whether the adapter recognises the rendered conversation (content/captureStatus.ts). */
+  capture: CaptureStatus;
+  /** Messages the adapter parses on the page right now (final or still streaming). */
+  visibleMessages: number;
 }
 
 /** chrome.storage.local keys readable by content scripts (booleans only, no secrets). */

@@ -14,10 +14,16 @@ import {
   type ContentStatusResponse,
 } from '../shared/messages';
 import { ChatGPTAdapter } from './adapters/ChatGPTAdapter';
+import { captureStatus } from './captureStatus';
 
 const adapter = new ChatGPTAdapter();
 
 if (adapter.isSupportedPage(window.location.href)) {
+  // When the open conversation last changed (ChatGPT navigates without reloading the page),
+  // so a conversation that is still rendering is not reported as an unrecognised layout.
+  let conversation = adapter.getConversationExternalId();
+  let conversationSince = Date.now();
+
   const manager = new CaptureManager({
     adapter,
     sink: {
@@ -41,11 +47,24 @@ if (adapter.isSupportedPage(window.location.href)) {
 
   chrome.runtime.onMessage.addListener((message: unknown, sender, sendResponse) => {
     if (sender.id !== chrome.runtime.id || (message as { type?: unknown })?.type !== 'CONTENT_PING') return false;
+    const current = adapter.getConversationExternalId();
+    if (current !== conversation) {
+      conversation = current;
+      conversationSince = Date.now();
+    }
+    const conversationDetected = current !== null;
+    const visibleMessages = adapter.scan().length;
     const response: ContentStatusResponse = {
       type: 'CONTENT_STATUS',
       provider: 'chatgpt',
       state: manager.state,
-      conversationDetected: adapter.getConversationExternalId() !== null,
+      conversationDetected,
+      capture: captureStatus({
+        conversationOpen: conversationDetected,
+        parsedMessages: visibleMessages,
+        pageAgeMs: Date.now() - conversationSince,
+      }),
+      visibleMessages,
     };
     sendResponse(response);
     return false;

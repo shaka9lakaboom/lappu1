@@ -29,7 +29,10 @@ logger = logging.getLogger("skillmirror.app")
 
 
 def _start_worker(settings: Settings) -> tuple[threading.Thread, threading.Event] | None:
-    if not settings.worker_enabled or settings.app_env == "test":
+    if settings.app_env == "test":
+        return None
+    if not settings.worker_enabled:
+        logger.info("worker: disabled (WORKER_ENABLED=false; run `python -m app.jobs.worker`)")
         return None
     if settings.database_url is None:
         logger.info("worker not started: DATABASE_URL is not set")
