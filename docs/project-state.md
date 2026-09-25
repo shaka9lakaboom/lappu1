@@ -25,36 +25,46 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4, P5, P6 and the demo-runtime hotfix are merged. **`main` = `00ff0a40ea2f93438b70dc00962c9235721df325`** (merge of PR #7: demo runtime + the `chatgpt-2` ChatGPT adapter with capture-degraded status). |
+| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4, P5, P6, the demo-runtime hotfix and P7 + P8 are merged. **`main` = `01e828c2cff800a86f8bfa4bdb97954652c75d4e`** (merge of PR #8: P7 teacher/admin + P8 benchmark/hardening). |
+| P7 + P8 merge commit | `01e828c2cff800a86f8bfa4bdb97954652c75d4e` (PR #8, head `f476bf0`; CI green on the PR run [36177071898](https://github.com/shaka9lakaboom/lappu1/actions/runs/36177071898) and on the `main` push [36177455267](https://github.com/shaka9lakaboom/lappu1/actions/runs/36177455267)) |
+| Demo-runtime hotfix merge commit | `00ff0a40ea2f93438b70dc00962c9235721df325` (PR #7: demo runtime + the `chatgpt-2` ChatGPT adapter with capture-degraded status) |
+| Hosted migrations | **0001–0009** (0009 = P7 + P8, pushed 2026-09-25 with the owner's approval). No migration was pushed after that; the next new one is 0010. |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
 | P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
 | P5 merge commit | `a0e6982546c82bb4dbb1920894fb6d4711ccfa34` (PR #5, head `0f12dc7`) |
 | P6 merge commit | `4a648ac2100738a228b3506cfb21e734c6756f02` (PR #6, head `583aea4`; the PR-triggered CI on that head passed before the merge) |
-| Development branch | `skillmirror-p7-p8-teacher-admin-hardening` (P7 + P8, from `4a648ac`; `main` `00ff0a4` merged in, no rebase) |
-| Previous branch | `skillmirror-p6-verification-loop` (merged in PR #6) |
+| Development branch | `skillmirror-p9-final-demo-hardening` (from `main` `01e828c`): so far only the P8 hosted smoke (script, walkthrough, records). P9 is not started. |
+| Previous branch | `skillmirror-p7-p8-teacher-admin-hardening` (P7 + P8, from `4a648ac`; `main` `00ff0a4` merged in, no rebase; merged in PR #8) |
 | P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | P2 + P3A commits (merged) | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
 | CI (P3B + P4) | green on the PR #4 head before the merge |
 | CI (P2 + P3A) | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P7 + P8 → `main`: one PR, opened after the hosted P7 acceptance and a green CI; not merged by the agent. P6: PR #6, **merged** as `4a648ac`. P5: PR #5, **merged** as `a0e6982`. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
+| Pull request | P7 + P8: PR #8, **merged** by the owner as `01e828c`. P6: PR #6, **merged** as `4a648ac`. P5: PR #5, **merged** as `a0e6982`. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
-**Current phase: P7 + P8 — Teacher/Admin + Benchmark/Hardening.** Branch
-`skillmirror-p7-p8-teacher-admin-hardening` from `main` `4a648ac` (the P6 merge). Hosted has
-**0001–0008**. **P7 is migration `0009_teacher_admin_ops.sql`**; it is pushed to hosted only after
-the owner's explicit approval. **P8 (benchmark + hardening) follows P7** and needs no migration of
-its own (its storage, `benchmark_runs`, is part of 0009). Decisions:
-[ADR 0008](decisions/0008-p7-p8-teacher-admin-hardening.md).
-**Status: P7 COMPLETE ON HOSTED; P8 IMPLEMENTED ON THE BRANCH (not on hosted).** Migration 0009 was
-pushed on 2026-09-25 with the owner's explicit approval ("Approved: 0009 only", after the owner's
-correction that the teacher overview needs a TEACHER membership of that course, with no ADMIN bypass)
-and verified read-only; the hosted P7 acceptance PASSED (see *Hosted acceptance P7*). P8: the
-critical gate passes deterministic 120/120 and replay 72/72; the live Flash-Lite run held every hard
-gate; the 2026-09-25 hosted attribution / evidence defect is fixed on the branch (see *Known defects*).
-Main was merged in (`00ff0a4`, PR #7: demo runtime + the `chatgpt-2` adapter); P8 builds on it.
+**Phase: P7 + P8 — Teacher/Admin + Benchmark/Hardening. P7 COMPLETE. P8 COMPLETE.** Merged in
+PR #8 as `main` `01e828c`. Hosted has **0001–0009** (P7 is migration `0009_teacher_admin_ops.sql`;
+P8 needs no migration of its own, its storage `benchmark_runs` is part of 0009). Decisions:
+[ADR 0008](decisions/0008-p7-p8-teacher-admin-hardening.md). **Next phase: P9 — Local Demo
+Integration + Final Hardening, not started.**
+
+- **P7:** migration 0009 pushed on 2026-09-25 with the owner's explicit approval ("Approved: 0009
+  only") and verified read-only; hosted P7 acceptance PASS (see *Hosted acceptance P7*).
+- **P8:** critical gate deterministic 120/120 and replay 72/72 (CI), live Flash-Lite 71/72 with
+  every hard gate held; the three runs are recorded on hosted `benchmark_runs` and shown by
+  `/admin/benchmark`; the hosted E2E smoke on the merged code PASSED (see *Hosted E2E smoke P8*).
+  The `gemini-3.7-flash` canary was skipped by the owner.
+- **Hosted remediation of the 2026-09-25 defect: COMPLETE.** The owner ran the targeted
+  `recompute_skill.py --apply` (2026-09-25 20:06:05 UTC). The smoke's `affected` phase passes
+  8/8, read-only: false delegations 2 → 1, debt 30.1433 → 0, the false VERIFY superseded,
+  activity actor = evidence actor, 0 model runs and 0 registry / evidence rows created (see
+  *Hosted E2E smoke P8*).
+- **P9 UX cleanup item:** the historical READY check `3aa4481e…` of that learner still shows in
+  the verification centre, although its VERIFY is superseded (no rule closes a READY session;
+  it was left untouched on purpose).
 
 ```
 GET /v1/me · GET /v1/teacher/courses[/{id}/overview]   (profile role from the database)
@@ -80,7 +90,7 @@ every admin mutation: Idempotency-Key -> one transaction -> audit event; no mode
 | Hosted migration 0009 | **PASS**: pushed with the owner's approval; 18 catalog checks; data unchanged | See *Database* |
 | Hosted P7 acceptance (disposable accounts, existing course 9440004a, no shared rows, 0 model calls) | **PASS**: prepare 4/4 · browser 3/3 · verify 17/17 · cleanup 5/5 | See *Hosted acceptance P7* |
 
-### P8: benchmark + hardening (this branch; ADR 0008 §27–43)
+### P8: benchmark + hardening (merged in PR #8; ADR 0008 §27–43)
 
 | Gate | State | Evidence |
 | --- | --- | --- |
@@ -89,14 +99,17 @@ every admin mutation: Idempotency-Key -> one transaction -> audit event; no mode
 | Live 72 on `gemini-3.5-flash-lite` (bounded, recorded) | **PASS on every hard gate**: 71/72, 0 blocked; REL-06 hit provider transport errors, re-recorded 5/5 | ADR 0008 §35; local `benchmark_runs`; 115 + 6 generation, 68 + 7 embedding requests on 2026-09-25 |
 | Replay 72 from the recording (CI; a miss = stale recording) | **PASS**: 72/72, 0 provider requests | `test_the_replay_set_passes_from_the_recording` |
 | Regression baseline (prompt versions, recording hash, metrics; −5 pt tolerance) | PASS (measured by the replay) | `benchmark/baselines/gemini-3.5-flash-lite.json`; `test_the_committed_recording_fits_this_code` |
-| Attribution / evidence consistency (hosted defect 2026-09-25) | PASS (branch); hosted remediation pending | §24–26; `test_attribution_consistency_db.py`; hard gate in the critical gate |
+| Attribution / evidence consistency (hosted defect 2026-09-25) | PASS (merged; live on hosted with disposable data; the hosted row remediated) | §24–26; `test_attribution_consistency_db.py`; hard gate in the critical gate; *Hosted E2E smoke P8* |
+| Hosted `benchmark_runs` (the three saved reports, inserted unchanged) | **PASS**: DETERMINISTIC 120/120 PASS · REPLAY 72/72 PASS · LIVE 71/72 FAIL (REL-06 transport errors; every hard gate held); `/admin/benchmark` shows them | *Hosted E2E smoke P8* |
 | H6 budget fail-safe · H7 stale-ledger sweep · H8 copy guard | PASS | `test_config.py`, `test_ledger_sweep_db.py`, `test_evidence_qualification.py` / `test_evidence_pipeline_db.py` |
 | H3 crash / restart · H4 backpressure per job type · H5 cache · H15 feedback | PASS | `test_hardening_db.py`, `test_hardening_unit.py`, existing worker / pipeline / verification tests |
 | H11 chatgpt-2 fixture matrix · H12 active-course picker | PASS | extension unit 100 (`chatgpt-thread-matrix.test.ts`, `courses.test.ts`), Chromium 4 |
 | H14 security sweep | PASS | error redaction at write, raw-HTML guard tests, `npm audit` 0, `pip-audit` 0, `supabase db lint` no schema errors |
 | H10 recorded signed-in fixture + `SIGNED_IN=1` live check | NOT DONE | needs the owner signed in; hotfix structure-from-live fixture + hosted `chatgpt-2` captures stand in |
 | H13 E2E CI job on the replay provider | NOT DONE | the replay provider exists (H2); the job is next |
-| Hosted E2E smoke · 3.7 canary · hosted remediation of the 2026-09-25 row | NOT DONE (owner approval) | 3.7 had 2 of 20 requests left on 2026-09-25 |
+| Hosted E2E smoke on the merged code (owner-approved) | **PASS**: inspect 4/4 · read model 4/4 · prepare 1/1 · run 1/1 · verify 9/9 · browser 2/2 · cleanup 3/3 · benchmark 5/5 · admin cleanup 2/2 · affected (after the owner's recompute) 8/8 | *Hosted E2E smoke P8* |
+| Hosted remediation of the 2026-09-25 row | **COMPLETE**: the owner's targeted `recompute_skill.py --apply`; `affected` **8/8** (read-only): delegations 2 → 1, debt 30.1433 → 0, VERIFY `e8d6092f…` superseded (NO_ACTION active), activity actor = evidence actor, the recompute created 0 model runs / registry / evidence / attribution / raw rows, the real learner unchanged, the READY session untouched | *Hosted E2E smoke P8* |
+| `gemini-3.7-flash` canary | **SKIPPED** by the owner (2026-09-26) | — |
 
 **Real live capture (chatgpt-2, hosted, read-only, ids only).** 13 messages in 2 conversations
 since 16:04 UTC, all `adapter_version = chatgpt-2`, extension 0.2.0, every reply paired with its
@@ -115,7 +128,7 @@ question. Conversation `c4f799a1…` (the defect turn): 8 messages, 4 turns, out
 | K6 | Live P3B/P4 = one STUDENT turn | **Closed**: 11 ATT + 2 DEBT + 3 ABS live cases, every hard gate 0 |
 | K7 | Pre-0005 turns have no attribution | Tool ready (P7 RESUME_ATTRIBUTION); hosted run waits for approval |
 | K8 | 3.7 / 3.8 free tier = 20/day | Limitation |
-| K9 / K10 | turn-analysis on 3.7; 3.7 live validation | Not run (approval; 3.7 had 2 requests left) |
+| K9 / K10 | turn-analysis on 3.7; 3.7 live validation | Not run: the 3.7 canary was skipped by the owner (2026-09-26); Flash-Lite stays the operational runtime |
 | K11 | Flash-Lite graph 24 skills; "binary search" → STOP | Live: "Explain binary search in one sentence." now MAP → binary search (EXPOSURE); "What is a regression?" still STOP (soft miss). The gate's graphs are hand-written (the graph-size probe was not re-run) |
 | K12 | One retrieval per unit | Limitation (ADR 0004) |
 | K13 | Query vectors cached in memory only | Limitation |
@@ -137,7 +150,7 @@ question. Conversation `c4f799a1…` (the defect turn): 8 messages, 4 turns, out
 | N2–N4, N6 | Course role; bootstrap stage; rejected candidates; raw admin errors | Closed in P7 (+ model-run errors redacted at write, P8) |
 | N5 | No worker without a real key | Replay provider (H2); the E2E job (H13) is not built |
 | N7 | Unranked invented mapping crashed the turn | **Closed** (found by the gate) |
-| N8 | Activity actor ≠ evidence actor; copy-guard reclassification counted as delegation; learner explanation lost | **Closed** on the branch (§24–26); hosted row re-derived by the sweep after deployment |
+| N8 | Activity actor ≠ evidence actor; copy-guard reclassification counted as delegation; learner explanation lost | **Closed** in code (§24–26, merged) and proven live on hosted with a disposable learner (the attribution validator refused the reused-loop span, the repair credited the learner's explanation). The 2026-09-25 row: remediated on hosted (read model corrected; ledger recomputed by the owner's targeted `--apply`, `affected` 8/8); the lost explanation stays lost (immutable); its READY check is a P9 UX cleanup item |
 | N9 | KaTeX math captured as MathML tokens | **Closed** (H11 matrix) |
 
 ### Previous phase: P6 (merged in PR #6, `4a648ac`)
@@ -586,6 +599,119 @@ Google can change them, so recheck before a live run. Billing / paid tier stays 
 | Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE`, **P6:** `GENERATE_VERIFICATION`, `GRADE_VERIFICATION` (entity: the verification session) |
 | P6 versions | prompts `verification-generation/v1`, `verification-evaluation/v1` (both ROUTINE tasks); planner `verification-planner/p6-v1`, generator `verification-generator/p6-v1`, validator `verification-validator/p6-v1`, graders `grader/mcq-exact-v1`, `grader/numeric-tolerance-v1`, `grader/short-exact-v1`, evaluator `evaluator/rubric-ai-v1`, evidence `verification/p6-v1`; ledger **`ledger/p6-v1`**, recommendations **`recommendations/p6-v1`** |
 | P5 versions (no model call) | recommendations `recommendations/p5-v1` (Engine 16: REVERIFY → VERIFY (actionable debt, max 2 active) → PREREQUISITE (EMERGING prerequisite) → PRACTICE → NO_ACTION); explanation codes + gates; debt bands NONE/LOW/MODERATE/HIGH at 15/25 |
+
+## Hosted E2E smoke P8 (2026-09-25 19:29–20:10 UTC): PASS on the merged code; hosted remediation COMPLETE
+
+Owner approval (2026-09-26): the hosted E2E smoke and the benchmark recording; the 3.7 canary
+skipped; no migration pushed. Code: `main` `01e828c`. Local FastAPI :8001 (from
+`services/backend/.env`, blank `GEMINI_API_KEY`, `WORKER_ENABLED=false`: no gateway, no worker) and
+Next.js :3001 → hosted Supabase (0001–0009). Script: `services/backend/scripts/smoke_p8_hosted.py`
+(phases below) + `apps/web/e2e/p8-smoke.spec.ts`. Evidence: `test-results/p8-hosted/`
+(git-ignored; ids only; credential files deleted at cleanup).
+
+**The 2026-09-25 learner / skill** (learner `8afbd2c8…`, "Writing for loops over ranges"
+`2761328b…`). Before the recompute (read-only):
+
+| # | Check | Result |
+| --- | --- | --- |
+| I3 | stored row vs the merged code | stored `ledger/p6-v1`: debt eligible, **30.14**, **2** delegations; the merged code (`ledger/p8-v1`) derives: not eligible, **0**, **1** delegation. Evidence `34e30938…` (AI OBSERVATION, QUALIFIED) counts; `91b0d433…` (COPIED_FROM_AI) does not |
+| M1 | activity actor == evidence actor (merged read model, 5 chips) | **PASS**: 0 mismatches; the defect chip (mapping `aeac8331…`) now shows actor AI, attributed actor STUDENT, OBSERVATION, COPIED_FROM_AI |
+| M2 | nothing of the learner changed | PASS (evidence, attributions, raw rows, ledger, recommendations: same hashes) |
+| M3 | READY verification session `3aa4481e…` | **untouched, still READY** (recommendation `e8d6092f…`). No rule changes a READY session (the planner abandons only stale IN_PROGRESS ones); only the learner can start or abandon it |
+| M4 | the stored row | still the old false debt (the recompute had not run yet) |
+
+- **The recompute.** `scripts/recompute_skill.py --learner 8afbd2c8-… --skill 2761328b-…`: the
+  agent's dry run (read-only) printed the expected change (2 → 1, 30.1 → 0, `ledger/p8-v1`). The
+  agent's `--apply` was refused by its permission policy (a write to a real learner's rows), so
+  **the owner ran `--apply`** after the smoke (the recomputed row's `computed_as_of`:
+  2026-09-25 20:06:05 UTC). It was run once; it is not to be repeated.
+- **After the recompute** (`smoke_p8_hosted.py affected --baseline snapshot-after.json`,
+  read-only): **PASS 8/8**.
+
+| # | Check | Result |
+| --- | --- | --- |
+| A1 | the row | `ledger/p8-v1`: **delegations 2 → 1, debt 30.1433 → 0**, not eligible; mastery UNKNOWN (unchanged) |
+| A2 | idempotent | the copy-guard record (`91b0d433…`) is not a delegation; a new recompute would change nothing |
+| A3 | no false VERIFY | `e8d6092f…` SUPERSEDED; the skill's active action is NO_ACTION / NOT_ENOUGH_EVIDENCE (`9ef4427e…`); no new VERIFY |
+| A4 | the learner's other 47 active recommendations | unchanged |
+| A5 | activity actor == evidence actor | 5 chips, 0 mismatches; the defect chip: actor AI, attributed STUDENT, OBSERVATION, COPIED_FROM_AI |
+| A6 | the learner's rows | only `skill_ledger` + `recommendations` changed; raw messages, segments, mappings, attributions, evidence identical |
+| A7 | READY session `3aa4481e…` | untouched, still READY (its recommendation is now SUPERSEDED) |
+| A8 | what the recompute itself wrote (vs the whole-database snapshot taken after the smoke, 19:55:59 UTC, before the recompute) | only `skill_ledger` and `recommendations` changed; `model_runs` 83, `skill_nodes` 67, `skill_aliases` 156, `skill_edges` 178, `course_skills` 80, `evidence_events` 6, `attributions` 6, `raw_messages` 24: identical rows and hashes, **0 rows created after the baseline** (the newest model run is the smoke's, 19:49:01 UTC); the real P3B/P4 learner unchanged against that post-smoke baseline; migrations unchanged |
+
+- **A8 first failed on a stale baseline, not on data.** Its first version compared the absolute
+  model-run count with the one `inspect` recorded **before** the smoke (76). The smoke then
+  added its own 7 model runs (83); the registry and the real learner matched. The check now
+  compares against a whole-database snapshot taken right before the recompute (new read-only
+  `baseline` phase; this time the post-smoke snapshot, which predates the recompute). It also
+  requires 0 rows created after that snapshot in the eight tables above. No data was changed to
+  make it pass.
+- **Why not the startup sweep.** A worker of the merged code sweeps at startup. A rolled-back
+  preview on hosted (before the recompute) showed that sweep would rewrite 5 rows: the 4 rows of
+  `8afbd2c8…` (the affected one as above; 3 only change their algorithm tag) and the one row of
+  **the real P3B/P4 learner `97d8e181…`** (`ledger/p4-v1` → `p8-v1`, values unchanged). It would
+  also insert **24 NO_ACTION recommendations** for that learner, who has none yet. The owner's
+  rule keeps that learner untouched, so the smoke worker was registered for PROCESS_RAW_MESSAGE
+  only, with no sweep. The next start of the demo runtime on `main` (`npm run demo`) will
+  re-tag the 3 remaining `8afbd2c8…` rows and the real learner's row, and insert those 24
+  NO_ACTION rows. The remediated row's values stay; only its `computed_as_of` advances.
+- The lost learner explanation was not recreated (immutable evidence; the segment is attributed).
+- **P9 UX cleanup item:** the READY check `3aa4481e…` stays in that learner's verification centre
+  although its VERIFY is superseded. P9 decides how the UI presents (or lets the learner dismiss)
+  a READY check whose reason is gone. The data stays as is until then.
+
+**Disposable part** (one `@mailinator.com` learner `39b2eaab…`, STUDENT of course `9440004a` only,
+no registry row; two ChatGPT turns of the defect's shape, synthetic text, sent to
+`POST /v1/events/batch` as the extension's `chatgpt-2` envelope with `active_course_id`):
+turn 1 "How do I loop over a list…" → the AI's loop; turn 2 the learner reuses that loop plus their
+own explanation and asks the AI to check it. Worker: the production `Worker` +
+`process_raw_message_job`, real gateway, Flash-Lite runtime overrides (not committed).
+
+| # | Check (hosted) | Result |
+| --- | --- | --- |
+| I1–I2 | migrations; open jobs | exactly 0001–0009; 0 open jobs (so the worker could only run ours) |
+| R1 | capture → processing | 4 messages accepted, 4 jobs COMPLETED at attempt 1 (2 EVIDENCE_RECORDED, 2 DEFERRED_TO_ASSISTANT) |
+| V1 | requests | **5 generation on `gemini-3.5-flash-lite`** (2 TURN_ANALYSIS + 3 SKILL_ATTRIBUTION) + 2 EMBED_QUERY; 7 of the 7 model runs in the window are the smoke's |
+| V2 | turn 1 | "Writing for loops over sequences" + "Iterating over lists": AI / EXPOSURE, strength 0 |
+| V3 | turn 2 (§26 live) | the first attribution quoted the reused loop as the learner's span: **refused by the attribution validator** (INVALID_OUTPUT, "quotes text the assistant already wrote earlier"); the one repair gave the loop to the AI (OBSERVATION) and credited **the learner's own explanation: STUDENT / INDEPENDENT_EXPLANATION, strength 0.4725**; no reused text credited |
+| V4 | `GET /v1/activity` | every chip's actor, type and reason = the recorded evidence (4/4) |
+| V5 | ledger | = the merged code's derivation; delegations 1 and 0; no debt; no COPIED_FROM_AI record counted |
+| V6 | recommendations, planner | no VERIFY / REVERIFY; `GET /v1/verifications` plans nothing; 0 model runs from the GETs |
+| V7 | `GET /v1/skills/{id}` | timeline = recorded evidence (4 items) |
+| V8 | replay of the 4 jobs | ALREADY_ANALYZED / DEFERRED_TO_ASSISTANT: 0 provider requests, 0 model runs, 0 new rows |
+| V9 | untouched | real P3B/P4 learner, `8afbd2c8…` and the registry (67 nodes, 178 edges, 156 aliases, 29 course skills) |
+| browser | `p8-smoke.spec.ts` learner | activity chips ("Actor: AI · The AI did it", "Actor: You · Explained it yourself"), both skill pages without VERIFY, `/verifications` empty; 1 passed |
+| C1–C3 | cleanup | Auth admin delete 200; 0 learner-owned rows, 0 memberships, 0 profiles, 0 auth users; the 7 model runs stay as the quota record with the learner id nulled (`on delete set null`); shared rows unchanged |
+
+"Iterating over lists" (`95e76e22…`) is a skill of the demo course `de89f3c1…`, not of `9440004a`:
+retrieval's stage 2 searches the global registry by design, so a mapped skill can be outside the
+learner's course. `GET /v1/ledger` lists course skills only; the smoke read that row from
+`skill_ledger`.
+
+**Benchmark recording.** The three saved runner reports (copied unchanged to
+`test-results/p8-hosted/reports/`, sha256 below) were inserted with
+`critical_gate.py record --from-report <report> --record-to <hosted>`, one each, count checked
+before each insert (append-only):
+
+| Mode | `benchmark_runs` id | Result | Verdict | Requests | Model | Code | Report sha256 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| DETERMINISTIC | `82341ff1…` | 120/120 | PASS | 0 | scripted | `fe15731` | `78831ffbbe4f5251…` (`det_final.json`) |
+| REPLAY | `edaf9cbd…` | 72/72 | PASS | 0 | gemini-3.5-flash-lite | `fe15731` | `ae0ed91aadb5e7fb…` (`replay2.json`) |
+| LIVE | `49359994…` | 71/72 (REL-06 failed) | FAIL | 183 (115 generation + 68 embedding) | gemini-3.5-flash-lite | `fe15731` | `90e600d603abbdef…` (`live_full.json`) |
+
+- B2: each row equals its report field by field (counts, hard gates, metrics, requests, model,
+  prompt versions, policy hash, code SHA, verdict, times): empty diff. All 13 hard gates held in
+  all three.
+- B3 + browser: a disposable ADMIN (signup, `grant_role.change_role`, one audited ROLE_CHANGE) read
+  `GET /v1/admin/benchmark` (3 runs, latest per mode = these ids) and `/admin/benchmark` showed the
+  three cards (PASS 120/120, PASS 72/72, FAIL 71/72 (1 failed), "All hard gates held.") and 3 table
+  rows; 1 passed. The admin was deleted (Auth cascade); its ROLE_CHANGE row stays (actor null).
+- The local-only fresh re-record (5/5) was not inserted on hosted.
+
+**Whole-database check** (`hosted_snapshot.py --compare`, before vs after): only `benchmark_runs`
+(+3), `model_runs` (+7, the smoke's) and `audit_events` (+1 ROLE_CHANGE) changed. Every other table
+is identical: ledger, recommendations, verification sessions, evidence and the rest. The real
+learner and the earlier migrations are unchanged.
 
 ## Hosted acceptance P7 (2026-09-25): PASS, no model call
 
@@ -1065,6 +1191,12 @@ Earlier: `test_model_gateway` (27), `test_skill_graph_unit`, `test_retrieval_sco
 
 ## CI
 
+P7 + P8 (PR #8): the PR run on head `f476bf0`
+([36177071898](https://github.com/shaka9lakaboom/lappu1/actions/runs/36177071898)) and the `main`
+push of the merge `01e828c`
+([36177455267](https://github.com/shaka9lakaboom/lappu1/actions/runs/36177455267)) both completed
+with success.
+
 Existing jobs are extended; no job was added. P6: the backend job runs the P6 unit tests (planner,
 validator, generator, graders, mastery/debt verification); backend integration runs
 `test_verification_db`; the database job runs pgTAP 0008; the web job runs the verification
@@ -1089,8 +1221,10 @@ auth round trip.
 
 ## Known defects and caveats
 
-- **Attribution / evidence consistency (hosted, 2026-09-25) — fixed on the branch, hosted
-  remediation pending** (ADR 0008 §24–26). A learner's own loop + explanation, checked by the AI,
+- **Attribution / evidence consistency (hosted, 2026-09-25) — fixed and merged (PR #8), proven
+  live on hosted with disposable data, hosted row remediated** (ADR 0008 §24–26; see *Hosted E2E
+  smoke P8*: `affected` 8/8). Left: the lost explanation (immutable) and the historical READY
+  check `3aa4481e…` (a P9 UX cleanup item). The text below is the original analysis. A learner's own loop + explanation, checked by the AI,
   showed "Actor: You" next to "The AI did it", then a high reliance signal, VERIFY and a READY check.
   Cause: the copy guard (the loop was in an earlier AI answer) recorded the evidence as the AI's; the
   activity chip showed the attributor's claim instead; the reclassified evidence counted as a second
@@ -1209,19 +1343,27 @@ auth round trip.
 
 ## Exact next action
 
-1. **Owner: review and merge the P7 + P8 pull request** (`skillmirror-p7-p8-teacher-admin-hardening`
-   → `main`; the agent does not merge). P9 is not started.
-2. **After the merge, restart the hosted runtime on `main`** (the demo backend). Its startup sweep
-   (§37) re-derives the 2026-09-25 false-debt row (`ledger/p6-v1`) and supersedes its VERIFY; to see
-   the change first, `scripts/recompute_skill.py --learner 8afbd2c8-… --skill 2761328b-…` (dry run).
-   The READY check `3aa4481e…` stays unless the owner wants it abandoned.
-3. **Owner approvals still open** (none is required for the PR):
-   - insert the P8 `benchmark_runs` rows on hosted, so `/admin/benchmark` shows them
-     (`critical_gate.py record --from-report <report> --record-to <hosted>`; append-only)
-   - the hosted E2E smoke and the `gemini-3.7-flash` canary (3.7 had 2 of 20 requests left on
-     2026-09-25)
+**P7 COMPLETE. P8 COMPLETE.** Merged (`main` `01e828c`); hosted has 0001–0009; the hosted E2E
+smoke passed; the three benchmark runs are recorded; the hosted remediation of the 2026-09-25 row
+is COMPLETE (`affected` 8/8). Do not run `recompute_skill.py --apply` for that row again.
+**P9 — Local Demo Integration + Final Hardening is not started.** Its branch
+`skillmirror-p9-final-demo-hardening` (from `main` `01e828c`) holds only the smoke script, the
+smoke walkthrough and these records so far.
+
+1. **P9 starts in its own session.** Carried into P9:
+   - **UX cleanup: the historical READY check `3aa4481e…`** (learner `8afbd2c8…`, "Writing for loops
+     over ranges"). It stays READY while its VERIFY `e8d6092f…` is superseded. Decide how the
+     verification centre shows (or lets the learner dismiss) a check whose reason is gone. Until
+     then nothing changes the session.
+   - The first `npm run demo` on `main` sweeps: it re-tags 3 rows of `8afbd2c8…` and the real
+     P3B/P4 learner's one row, and inserts 24 NO_ACTION recommendations for the real learner
+     (previewed, rolled back; no model call).
+   - The E2E CI job on the replay provider (H13); `skill-attribution/v3` for Flash-Lite's false
+     credit of questions (ADR 0008 §35).
+2. **Run the demo only from `main`.** The old `lappu1-demo-hotfix` checkout (`00ff0a4`, `ledger/p6-v1`)
+   would re-derive a row with the old algorithm on that skill's next evidence.
+3. **Owner approvals still open:**
    - `RESUME_ATTRIBUTION` for the pre-0005 hosted turns (K7, ≤ 2 requests)
    - the recorded signed-in ChatGPT fixture and the `SIGNED_IN=1` live check (H10: needs the owner
      signed in)
-4. **Next engineering** (not in this PR): the E2E CI job on the replay provider (H13), and
-   `skill-attribution/v3` for Flash-Lite's false credit of questions (ADR 0008 §35).
+   - the `gemini-3.7-flash` canary was skipped by the owner (not planned)

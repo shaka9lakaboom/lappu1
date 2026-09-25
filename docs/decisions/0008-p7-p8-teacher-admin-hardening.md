@@ -1,8 +1,10 @@
 # 0008 — P7 teacher + admin operations; P8 benchmark + hardening
 
-- Status: accepted. P7 is on hosted (0009 pushed with the owner's approval; hosted acceptance
-  PASS). P8 (§27–43) is implemented on the branch; its hosted steps (fixed-code deployment, the
-  remediation of the 2026-09-25 defect, the E2E smoke, the 3.7 canary) wait for the owner.
+- Status: accepted; P7 and P8 complete, merged in PR #8 (`main` `01e828c`). P7 is on hosted
+  (0009 pushed with the owner's approval; hosted acceptance PASS). P8 (§27–43): the hosted E2E
+  smoke on the merged code passed, the three benchmark runs are recorded on hosted and the
+  2026-09-25 defect is remediated on hosted (§24–26), all with the owner's approval; the 3.7 canary
+  was skipped by the owner. Details: `docs/project-state.md`, *Hosted E2E smoke P8*.
 - Date: 2026-09-25
 - Scope: P7 (architecture §4 roles, §7.1 `audit_events`, §8.2 candidate review, §12.3 teacher /
   admin, §13 `/v1/me`, `/v1/teacher`, `/v1/admin`, §17 `benchmark_runs`) and the P8 hardening
@@ -214,15 +216,21 @@ mutation-checked):
 The copy guard also sees the conversation's earlier assistant messages (up to 50, not only the
 4-message window) and matches an elided span piece by piece (`evidence/p8-v1`, H8).
 
-Hosted remediation (not applied; needs the owner): the hosted runtime runs `main` without these
-fixes, so a recompute now would be undone by its next recompute of the skill. After the merge and
-a restart on the fixed code, the worker's startup sweep (§37) re-derives the row by itself (it was
-computed by `ledger/p6-v1`) and reconciles the recommendations (VERIFY → superseded). To see the
-change first: `scripts/recompute_skill.py --learner 8afbd2c8-… --skill 2761328b-…` (dry run by
-default; read-only dry run on 2026-09-25: debt eligible → not eligible, 30.1 → 0.0, delegations
-2 → 1, `ledger/p8-v1`); `--apply` does the same as the sweep for this one row. The READY check `3aa4481e…` is not cancelled by any rule; leaving it lets
-the learner add genuine verification evidence. The lost explanation cannot be restored: evidence
-and attributions are immutable and the segment is already attributed.
+Hosted remediation (**complete**, 2026-09-25 20:06 UTC, after the merge): the owner ran the
+targeted `scripts/recompute_skill.py --learner 8afbd2c8-… --skill 2761328b-… --apply`. It does
+for this one row what the worker's startup sweep (§37) does for every stale row. It was chosen
+over the sweep because a rolled-back preview showed the sweep would also re-tag the real P3B/P4
+learner's ledger row and insert their recommendations. Result, checked read-only by
+`scripts/smoke_p8_hosted.py affected` (8/8):
+- delegations 2 → 1 and debt 30.1433 → 0 (not eligible), `ledger/p8-v1`; the VERIFY superseded,
+  NO_ACTION active, no new VERIFY;
+- activity actor = evidence actor;
+- only the ledger and recommendations changed: 0 model runs and 0 registry, evidence, attribution
+  or raw rows were created.
+
+The READY check `3aa4481e…` is not cancelled by any rule and was left untouched; how the UI
+presents a READY check whose VERIFY is superseded is a P9 UX item. The lost explanation cannot be
+restored: evidence and attributions are immutable and the segment is already attributed.
 
 ## P8: the critical gate
 
@@ -296,9 +304,11 @@ and attributions are immutable and the segment is already attributed.
       None creates debt; the false credits raise mastery a little (strength ≤ 0.9 each). They are
       the input of a future `skill-attribution/v3` (K4), not fixed by lowering a gate.
     - *Record*: `benchmark_runs` on the local database holds the four rows (live 71/72 FAIL, the
-      fresh re-record 5/5, replay 72/72, deterministic 120/120). The hosted admin page shows hosted
-      rows only; inserting them (`critical_gate.py record --from-report … --record-to <hosted>`,
-      append-only) waits for the owner.
+      fresh re-record 5/5, replay 72/72, deterministic 120/120). On hosted (owner-approved,
+      2026-09-25), `critical_gate.py record --from-report … --record-to <hosted>` inserted the three
+      saved reports unchanged: deterministic 120/120 PASS, replay 72/72 PASS, live 71/72 FAIL
+      (every hard gate held). Each hosted row equals its report field by field, and
+      `/admin/benchmark` shows them. The fresh re-record 5/5 stays local.
 
 ## P8: hardening
 
@@ -338,8 +348,11 @@ and attributions are immutable and the segment is already attributed.
 43. **Not done in P8** (recorded, not claimed): the recorded signed-in ChatGPT fixture and the
     `SIGNED_IN=1` live check (H10: needs the owner signed in; the hotfix's structure-from-live
     fixture and the hosted `chatgpt-2` captures stand in); the E2E CI job on the replay provider
-    (H13); the hosted E2E smoke and the 3.7 canary (need the owner's approval; 3.7 had 2 of 20
-    requests left on 2026-09-25).
+    (H13); the 3.7 canary (skipped by the owner). The hosted E2E smoke was run after the merge
+    with the owner's approval and passed: `scripts/smoke_p8_hosted.py` + `e2e/p8-smoke.spec.ts`,
+    a disposable learner on Flash-Lite (5 generation requests; the attribution validator refused
+    the reused-loop span live and the repair credited the learner's explanation), cleaned up
+    through the Auth cascade.
 
 ## Web
 
