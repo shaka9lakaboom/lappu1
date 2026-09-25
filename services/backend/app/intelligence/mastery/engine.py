@@ -1,4 +1,4 @@
-"""Mastery model (architecture §10.2, §10.3, Appendix B; ADR 0005). Deterministic, no model call.
+"""Mastery model (architecture §10.2, §10.3, Appendix B; ADR 0005, ADR 0007). Deterministic, no model call.
 
 Recomputed from ALL non-excluded, performance-bearing EvidenceEvents of a skill:
 
@@ -13,41 +13,60 @@ Recomputed from ALL non-excluded, performance-bearing EvidenceEvents of a skill:
 (strength_i already holds base weight x difficulty x independence x confidence.)
 
 States, checked in this order - UNKNOWN first, so insufficient support is
-UNKNOWN whatever the mean looks like (§2.2 "unknown is not weak"):
+UNKNOWN whatever the mean or verification history looks like (§2.2 "unknown is not weak"):
 
     UNKNOWN               support < unknown_min_support
-    VERIFIED              recent successful SkillMirror verification + mean/support gates
-    NEEDS_REVERIFICATION  verified before, but that verification is stale
+    VERIFIED              verification standing CURRENT (below)
+    NEEDS_REVERIFICATION  verification standing STALE or CONTRADICTED
     EMERGING              mean < emerging_below_mean
     DEMONSTRATED          mean >= demonstrated_min_mean, support >= demonstrated_min_support
                           and at least one successful independent application
     DEVELOPING            otherwise
 
-VERIFIED and NEEDS_REVERIFICATION need evidence from a SkillMirror verification
-source. Before P6 no source counts as one (VERIFICATION_SOURCES is empty, so even a
-VERIFICATION evidence row cannot verify), nothing writes such evidence, and migration
-0006 refuses both states in skill_ledger: they are unreachable in P4.
+Verification (P6). Only evidence from a SkillMirror verification counts (VERIFICATION_SOURCES).
+§10.3 lists VERIFIED's thresholds as the *initial* gate, and NEEDS_REVERIFICATION as "previously
+VERIFIED but verification evidence is stale or materially contradicted by newer evidence". So:
+
+* VERIFIED is ENTERED at a checkpoint (the current instant, or the day of an earlier performance
+  evidence event) where a recent successful verification exists (age <= verification_max_age_days)
+  AND mastery_mean >= verified_min_mean AND support >= verified_min_support, computed from the
+  evidence up to that checkpoint. A pass alone never verifies a skill whose mean or support is
+  short of the gates.
+* Once entered, VERIFIED HOLDS - a single later failure lowers the mean (it is recorded, never
+  hidden) but does not erase the verified history - until either
+    - the verification that anchored it is stale (older than verification_max_age_days), or
+    - newer evidence materially contradicts it: at least `min_contradicting_failures` (>= 2,
+      policy) independent failures after the last verified checkpoint.
+  Then the skill NEEDS_REVERIFICATION (standing STALE / CONTRADICTED). A later SkillMirror check
+  resolves that need: if it restores the VERIFIED gates the skill is VERIFIED again, otherwise the
+  regular evidence gates (EMERGING / DEVELOPING / DEMONSTRATED) apply.
+
+Migration 0008 additionally refuses VERIFIED / NEEDS_REVERIFICATION in skill_ledger without a
+passed VERIFICATION EvidenceEvent of the skill.
 """
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
-from app.intelligence.policy import ZERO_STRENGTH_TYPES, MasteryPolicy
+from app.intelligence.policy import ZERO_STRENGTH_TYPES, MasteryPolicy, ReverificationPolicy
 
-ALGORITHM_VERSION = "ledger/p4-v1"
+# ledger/p6-v1: VERIFICATION evidence is active (verification standing, hold, reverification).
+ALGORITHM_VERSION = "ledger/p6-v1"
 
-# Evidence sources that count as SkillMirror-controlled verification. P6 adds
-# "VERIFICATION" together with the verification system and its migration.
-VERIFICATION_SOURCES: frozenset[str] = frozenset()
+# Evidence sources that count as SkillMirror-controlled verification (P6).
+VERIFICATION_SOURCES: frozenset[str] = frozenset({"VERIFICATION"})
 VERIFICATION_EVIDENCE_TYPES = frozenset({"VERIFICATION", "TRANSFER"})
 
 MasteryStateName = Literal[
     "UNKNOWN", "EMERGING", "DEVELOPING", "DEMONSTRATED", "VERIFIED", "NEEDS_REVERIFICATION"
 ]
+# NONE: never verified. CURRENT: verified (entered now, or held). STALE / CONTRADICTED: it was
+# verified, and needs a fresh check.
+VerificationStanding = Literal["NONE", "CURRENT", "STALE", "CONTRADICTED"]
 
 
 @dataclass(frozen=True)
@@ -90,8 +109,15 @@ class MasteryResult:
     performance_evidence_count: int
     last_evidence_at: datetime | None
     has_application: bool
+    # A successful SkillMirror verification within verification_max_age_days.
     recently_verified: bool
+    # The skill was VERIFIED at some point (entered at a checkpoint).
     previously_verified: bool
+    verification_standing: VerificationStanding = "NONE"
+    # When the verification anchoring the (current or last) VERIFIED standing happened.
+    last_verified_at: datetime | None = None
+    # Independent failures since the last verified checkpoint (the contradiction count).
+    contradicting_failures: int = 0
 
 
 def age_days(as_of: datetime, occurred_at: datetime) -> int:
@@ -113,24 +139,27 @@ def is_verification(record: EvidenceRecord) -> bool:
     )
 
 
+def is_verification_pass(record: EvidenceRecord) -> bool:
+    return (
+        record.performance_bearing
+        and is_verification(record)
+        and (record.outcome_signal == "CORRECT")
+    )
+
+
 def classify_state(
     mastery_mean: float,
     support: float,
     *,
     has_application: bool,
-    recently_verified: bool,
-    previously_verified: bool,
+    verification: VerificationStanding,
     policy: MasteryPolicy,
 ) -> MasteryStateName:
     if support < policy.unknown_min_support:
         return "UNKNOWN"
-    if (
-        recently_verified
-        and mastery_mean >= policy.verified_min_mean
-        and support >= policy.verified_min_support
-    ):
+    if verification == "CURRENT":
         return "VERIFIED"
-    if previously_verified and not recently_verified:
+    if verification in ("STALE", "CONTRADICTED"):
         return "NEEDS_REVERIFICATION"
     if mastery_mean < policy.emerging_below_mean:
         return "EMERGING"
@@ -143,11 +172,9 @@ def classify_state(
     return "DEVELOPING"
 
 
-def compute_mastery(
-    records: Iterable[EvidenceRecord], policy: MasteryPolicy, as_of: datetime
-) -> MasteryResult:
-    included = [r for r in records if not r.excluded]
-    performance = [r for r in included if r.performance_bearing]
+def _weighted(
+    performance: Sequence[EvidenceRecord], policy: MasteryPolicy, as_of: datetime
+) -> tuple[float, float, float]:
     alpha, beta, support = policy.prior_alpha, policy.prior_beta, 0.0
     for record in performance:
         weight = record.strength * recency_multiplier(
@@ -156,6 +183,89 @@ def compute_mastery(
         alpha += weight * record.outcome  # type: ignore[operator]  # performance_bearing
         beta += weight * (1.0 - record.outcome)  # type: ignore[operator]
         support += weight
+    return alpha, beta, support
+
+
+def _verified_gates(
+    performance: Sequence[EvidenceRecord], policy: MasteryPolicy, as_of: datetime
+) -> bool:
+    """The §10.3 VERIFIED gates at `as_of`: a recent pass plus the mean and support gates."""
+    if not any(
+        is_verification_pass(r)
+        and age_days(as_of, r.occurred_at) <= policy.verification_max_age_days
+        for r in performance
+    ):
+        return False
+    alpha, beta, support = _weighted(performance, policy, as_of)
+    return (
+        alpha / (alpha + beta) >= policy.verified_min_mean
+        and support >= policy.verified_min_support
+    )
+
+
+def _contradicts(record: EvidenceRecord, policy: ReverificationPolicy) -> bool:
+    return (
+        record.evidence_type in policy.contradicting_evidence_types
+        and record.outcome_signal in policy.contradicting_outcome_signals
+    )
+
+
+def verification_standing(
+    performance: Sequence[EvidenceRecord],
+    *,
+    policy: MasteryPolicy,
+    reverification: ReverificationPolicy,
+    as_of: datetime,
+) -> tuple[VerificationStanding, datetime | None, int]:
+    """(standing, anchor verification time, contradicting failures) for chronological evidence.
+
+    Checkpoints are the current instant and the day of every performance event at or after the
+    first pass, each judged on the evidence up to it. The last checkpoint that met the VERIFIED
+    gates anchors the standing to the latest pass before it."""
+    first_pass = next((i for i, r in enumerate(performance) if is_verification_pass(r)), None)
+    if first_pass is None:
+        return "NONE", None, 0
+
+    def anchor(upto: int) -> datetime:
+        return max(r.occurred_at for r in performance[: upto + 1] if is_verification_pass(r))
+
+    if _verified_gates(performance, policy, as_of):
+        return "CURRENT", anchor(len(performance) - 1), 0
+    last_checkpoint = None
+    for index in range(len(performance) - 1, first_pass - 1, -1):
+        if _verified_gates(performance[: index + 1], policy, performance[index].occurred_at):
+            last_checkpoint = index
+            break
+    if last_checkpoint is None:
+        return "NONE", None, 0
+    anchored_at = anchor(last_checkpoint)
+    later = performance[last_checkpoint + 1 :]
+    failures = sum(1 for r in later if _contradicts(r, reverification))
+    contradicted = failures >= reverification.min_contradicting_failures
+    stale = age_days(as_of, anchored_at) > policy.verification_max_age_days
+    if not (contradicted or stale):
+        return "CURRENT", anchored_at, failures
+    if any(is_verification(r) for r in later):
+        # A SkillMirror check after the last verified checkpoint already re-checked the skill
+        # (it did not meet the VERIFIED gates, or the skill would have a newer checkpoint):
+        # the need for re-verification is resolved and the regular evidence gates apply.
+        return "NONE", anchored_at, failures
+    return ("CONTRADICTED" if contradicted else "STALE"), anchored_at, failures
+
+
+def compute_mastery(
+    records: Iterable[EvidenceRecord],
+    policy: MasteryPolicy,
+    as_of: datetime,
+    *,
+    reverification: ReverificationPolicy,
+) -> MasteryResult:
+    included = [r for r in records if not r.excluded]
+    # Chronological (then by id): checkpoints and "newer evidence" are well defined.
+    performance = sorted(
+        (r for r in included if r.performance_bearing), key=lambda r: (r.occurred_at, str(r.id))
+    )
+    alpha, beta, support = _weighted(performance, policy, as_of)
     mean = alpha / (alpha + beta)
 
     has_application = any(
@@ -163,17 +273,16 @@ def compute_mastery(
         and (r.outcome or 0.0) >= policy.application_min_outcome
         for r in performance
     )
-    passes = [r for r in performance if is_verification(r) and r.outcome_signal == "CORRECT"]
     recently_verified = any(
-        age_days(as_of, r.occurred_at) <= policy.verification_max_age_days for r in passes
+        is_verification_pass(r)
+        and age_days(as_of, r.occurred_at) <= policy.verification_max_age_days
+        for r in performance
+    )
+    standing, verified_at, failures = verification_standing(
+        performance, policy=policy, reverification=reverification, as_of=as_of
     )
     state = classify_state(
-        mean,
-        support,
-        has_application=has_application,
-        recently_verified=recently_verified,
-        previously_verified=bool(passes),
-        policy=policy,
+        mean, support, has_application=has_application, verification=standing, policy=policy
     )
     return MasteryResult(
         alpha=alpha,
@@ -186,5 +295,8 @@ def compute_mastery(
         last_evidence_at=max((r.occurred_at for r in included), default=None),
         has_application=has_application,
         recently_verified=recently_verified,
-        previously_verified=bool(passes),
+        previously_verified=verified_at is not None,
+        verification_standing=standing,
+        last_verified_at=verified_at,
+        contradicting_failures=failures,
     )

@@ -13,6 +13,7 @@ import {
   formatTime,
   recommendationText,
 } from '@/lib/experience';
+import { verificationActionLabel, verificationHref } from '@/lib/verification';
 
 /** Mastery state with a plain-language reason; the numbers stay behind "Why?". */
 export function MasteryPanel({ mastery }: { mastery: MasteryExplanation }) {
@@ -39,7 +40,8 @@ export function MasteryPanel({ mastery }: { mastery: MasteryExplanation }) {
                   {gate.current !== null && gate.required !== null ? (
                     <span className="text-muted-foreground">
                       {' '}
-                      ({gate.code === 'STRONG_RESULTS' ? 'result estimate' : 'evidence weight'} {gate.current.toFixed(2)},
+                      ({gate.code === 'STRONG_RESULTS' || gate.code === 'VERIFIED_RESULTS' ? 'result estimate' : 'evidence weight'}{' '}
+                      {gate.current.toFixed(2)},
                       needs {gate.required.toFixed(2)})
                     </span>
                   ) : null}
@@ -100,6 +102,7 @@ export function DebtPanel({ debt }: { debt: DebtExplanation }) {
 
 export function RecommendationCard({ rec, showSkill = true }: { rec: Recommendation; showSkill?: boolean }) {
   const text = recommendationText(rec);
+  const check = verificationHref(rec);
   return (
     <div className="space-y-1" data-testid="recommendation" data-type={rec.type} data-skill-id={rec.skill_id}>
       <p className="font-medium" data-testid="recommendation-title">
@@ -117,6 +120,15 @@ export function RecommendationCard({ rec, showSkill = true }: { rec: Recommendat
       {rec.type === 'PREREQUISITE' && rec.related_skill_id ? (
         <Link href={`/skills/${rec.related_skill_id}`} className="text-sm underline underline-offset-4">
           Open {rec.related_skill_name ?? 'the prerequisite'}
+        </Link>
+      ) : null}
+      {check ? (
+        <Link
+          href={check}
+          className="inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted"
+          data-testid="recommendation-verify"
+        >
+          {verificationActionLabel(rec)}
         </Link>
       ) : null}
       {rec.verify_deferred ? (

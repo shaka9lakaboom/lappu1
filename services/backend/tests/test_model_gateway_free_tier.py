@@ -16,6 +16,8 @@ from app.intelligence.processing.turn_analysis import TASK_TYPE as TURN_TASK_TYP
 from app.intelligence.relevance.engine import TASK_TYPE as QUALIFICATION_TASK_TYPE
 from app.intelligence.retrieval.rerank import TASK_TYPE as RERANK_TASK_TYPE
 from app.intelligence.skill_graph.bootstrap import TASK_TYPE as GRAPH_TASK_TYPE
+from app.intelligence.verification.evaluator import TASK_TYPE as VERIFICATION_EVALUATION_TASK_TYPE
+from app.intelligence.verification.generator import TASK_TYPE as VERIFICATION_GENERATION_TASK_TYPE
 from app.model_gateway import (
     HIGH_VALUE_TASKS,
     ROUTINE_TASKS,
@@ -400,8 +402,12 @@ def test_every_engine_generation_task_is_classified() -> None:
         ADJUDICATION_TASK_TYPE,
         GRAPH_TASK_TYPE,
         ATTRIBUTION_TASK_TYPE,
+        VERIFICATION_GENERATION_TASK_TYPE,
+        VERIFICATION_EVALUATION_TASK_TYPE,
     }
     assert engine_tasks == ROUTINE_TASKS | HIGH_VALUE_TASKS
+    # P6: both verification tasks are routine (the hackathon Flash-Lite pool can serve them).
+    assert {VERIFICATION_GENERATION_TASK_TYPE, VERIFICATION_EVALUATION_TASK_TYPE} <= ROUTINE_TASKS
     assert not ROUTINE_TASKS & HIGH_VALUE_TASKS
 
 

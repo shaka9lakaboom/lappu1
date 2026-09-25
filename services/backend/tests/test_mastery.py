@@ -1,5 +1,6 @@
-"""Mastery model (architecture §10.2, §10.3; ADR 0005): weighted Beta evidence, recency,
-UNKNOWN before any mean threshold, VERIFIED / NEEDS_REVERIFICATION unreachable before P6."""
+"""Mastery model (architecture §10.2, §10.3; ADR 0005, ADR 0007): weighted Beta evidence, recency,
+UNKNOWN before any mean threshold; only a SkillMirror verification can verify (P6 rules in
+test_mastery_verification.py)."""
 
 import math
 import random
@@ -12,14 +13,19 @@ from app.intelligence.mastery.engine import (
     VERIFICATION_SOURCES,
     EvidenceRecord,
     classify_state,
-    compute_mastery,
 )
+from app.intelligence.mastery.engine import compute_mastery as _compute_mastery
 from app.intelligence.policy import MasteryPolicy
 from tests.fakes import ARCHITECTURE_POLICY, policy
 
 NOW = datetime(2026, 9, 25, 12, tzinfo=UTC)
 MASTERY = policy().mastery
+REVERIFICATION = policy().verification.reverification
 SKILL = uuid4()
+
+
+def compute_mastery(records, mastery_policy, as_of):
+    return _compute_mastery(records, mastery_policy, as_of, reverification=REVERIFICATION)
 
 
 def record(
@@ -105,15 +111,15 @@ def test_recency_halves_the_weight_every_half_life() -> None:
     )
 
 
-def test_unknown_is_checked_before_every_mean_threshold() -> None:
+@pytest.mark.parametrize("verification", ["NONE", "CURRENT", "STALE", "CONTRADICTED"])
+def test_unknown_is_checked_before_every_mean_threshold(verification) -> None:
     for mean in (0.01, 0.3, 0.6, 0.95, 0.999):
         assert (
             classify_state(
                 mean,
                 0.99,
                 has_application=True,
-                recently_verified=True,
-                previously_verified=True,
+                verification=verification,
                 policy=MASTERY,
             )
             == "UNKNOWN"
@@ -195,12 +201,12 @@ def test_recomputation_is_idempotent_and_order_independent() -> None:
     )
 
 
-def test_no_verification_source_exists_before_p6() -> None:
-    assert VERIFICATION_SOURCES == frozenset()
+def test_only_a_skillmirror_verification_source_counts() -> None:
+    assert VERIFICATION_SOURCES == frozenset({"VERIFICATION"})
 
 
 @pytest.mark.parametrize("seed", range(40))
-def test_verified_and_needs_reverification_are_unreachable_before_p6(seed) -> None:
+def test_only_verification_evidence_can_reach_verified_or_needs_reverification(seed) -> None:
     rng = random.Random(seed)
     types = [
         "EXPOSURE",
@@ -218,18 +224,20 @@ def test_verified_and_needs_reverification_are_unreachable_before_p6(seed) -> No
             rng.choice(["CORRECT", "CORRECT", "PARTIAL", "INCORRECT"]),
             strength=rng.uniform(0.5, 3.0),
             days=rng.uniform(0, 400),
-            # Even evidence claiming to come from a verification source cannot verify yet.
-            source_type=rng.choice(["AI_ACTIVITY", "VERIFICATION", "ASSESSMENT", "TEACHER"]),
+            # Even evidence claiming a VERIFICATION type verifies nothing without a
+            # SkillMirror verification source.
+            source_type=rng.choice(["AI_ACTIVITY", "ASSESSMENT", "TEACHER"]),
         )
         for _ in range(rng.randint(0, 40))
     ]
-    state = compute_mastery(records, MASTERY, NOW).state
-    assert state not in ("VERIFIED", "NEEDS_REVERIFICATION")
+    m = compute_mastery(records, MASTERY, NOW)
+    assert m.state not in ("VERIFIED", "NEEDS_REVERIFICATION")
+    assert m.verification_standing == "NONE" and not m.previously_verified
 
 
 def test_perfect_transfer_evidence_is_at_most_demonstrated() -> None:
     records = [record("TRANSFER", strength=1.25) for _ in range(30)] + [
-        record("VERIFICATION", strength=1.5, source_type="VERIFICATION") for _ in range(30)
+        record("VERIFICATION", strength=1.5, source_type="TEACHER") for _ in range(30)
     ]
     m = compute_mastery(records, MASTERY, NOW)
     assert m.mastery_mean > 0.95 and m.support > 40

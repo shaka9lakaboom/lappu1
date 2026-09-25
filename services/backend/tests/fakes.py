@@ -120,6 +120,47 @@ ARCHITECTURE_POLICY: dict[str, Any] = {
         "prerequisite_gap_states": ["EMERGING"],
         "debt_bands": {"moderate_min": 15, "high_min": 25},
     },
+    # Migration 0008 (P6) seed, ADR 0007.
+    "verification": {
+        "planner": {
+            "max_daily_unsolicited": 2,
+            "cooldown_after_pass_days": 7,
+            "cooldown_after_fail_days": 1,
+            "cooldown_after_abandon_days": 1,
+            "retry_after_generation_failure_hours": 24,
+            "abandon_in_progress_after_days": 14,
+        },
+        "difficulty": {"band_half_width": 0.15, "min": 0.1, "max": 0.9},
+        "generation": {
+            "max_attempts": 3,
+            "supported_assessment_types": ["mcq", "numeric", "short_response", "reasoning"],
+            "history_limit": 5,
+            "duplicate_max_similarity": 0.8,
+            "min_prompt_chars": 20,
+            "max_prompt_chars": 4000,
+            "min_estimated_minutes": 1,
+            "max_estimated_minutes": 15,
+        },
+        "grading": {
+            "numeric_relative_tolerance": 0.005,
+            "numeric_absolute_tolerance": 0.000001,
+            "max_response_chars": 4000,
+            "short_response_max_chars": 1000,
+            "numeric_max_chars": 64,
+            "rubric_pass_min_score": 0.7,
+            "min_ai_grading_confidence": 0.7,
+        },
+        "reverification": {
+            "min_contradicting_failures": 2,
+            "contradicting_evidence_types": [
+                "INDEPENDENT_APPLICATION",
+                "TRANSFER",
+                "EXECUTION_RESULT",
+                "VERIFICATION",
+            ],
+            "contradicting_outcome_signals": ["INCORRECT"],
+        },
+    },
 }
 
 
@@ -227,6 +268,8 @@ MARKERS = {
     "turn": "You are the turn analyst",
     "turn_adjudication": "You are the turn adjudicator",
     "attribution": "You are the contribution attributor",
+    "verification": "You write verification challenges",
+    "evaluation": "You grade a learner's answer",
 }
 
 
@@ -379,3 +422,47 @@ def attribute_all(**fields: Any) -> Callable[[list[Message]], dict[str, Any]]:
         return {"attributions": [attribution(i, **fields) for i in skill_ids_in(messages)]}
 
     return respond
+
+
+def challenge(skill_id: str, **overrides: Any) -> dict[str, Any]:
+    """A valid VERIFICATION_GENERATION output (Appendix A.4 + choices): an MCQ by default."""
+    out: dict[str, Any] = {
+        "skill_id": skill_id,
+        "difficulty": 0.5,
+        "assessment_type": "mcq",
+        "prompt": (
+            "A librarian must list every member, including members who never borrowed a book. "
+            "Which join returns all members together with any loans they have?"
+        ),
+        "choices": [
+            {"key": "A", "text": "INNER JOIN members to loans"},
+            {"key": "B", "text": "LEFT JOIN from members to loans"},
+            {"key": "C", "text": "CROSS JOIN members and loans"},
+        ],
+        "expected_answer": "B",
+        "rubric": [],
+        "prerequisites_used": [],
+        "transfer_distance": "medium",
+        "estimated_minutes": 2,
+    }
+    out.update(overrides)
+    return out
+
+
+def evaluation(criteria: Sequence[tuple[str, bool]], **overrides: Any) -> dict[str, Any]:
+    """A VERIFICATION_EVALUATION output (Appendix A.5) consistent with 1-point criteria."""
+    met = sum(1 for _, ok in criteria if ok)
+    score = met / len(criteria) if criteria else 0.0
+    out: dict[str, Any] = {
+        "score": score,
+        "pass": score >= 0.7,
+        "criterion_results": [
+            {"criterion": c, "met": ok, "evidence": "quoted part" if ok else ""}
+            for c, ok in criteria
+        ],
+        "confidence": 0.9,
+        "feedback": "Clear reasoning about the unmatched rows.",
+        "needs_review": False,
+    }
+    out.update(overrides)
+    return out

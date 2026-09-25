@@ -35,6 +35,9 @@ from app.intelligence.contracts import (
     SegmentIntent,
     SegmentRoute,
     SkillMappingStatus,
+    VerificationAssessmentType,
+    VerificationEvaluatorType,
+    VerificationState,
 )
 
 # processing_jobs.state (migration 0002).
@@ -44,7 +47,14 @@ DebtFactorCode = Literal[
     "DELEGATION_PRESSURE", "EVIDENCE_GAP", "IMPORTANCE", "CONFIDENCE", "VERIFICATION"
 ]
 MasteryGateCode = Literal[
-    "ENOUGH_EVIDENCE", "STRONG_RESULTS", "SUSTAINED_EVIDENCE", "INDEPENDENT_APPLICATION"
+    "ENOUGH_EVIDENCE",
+    "STRONG_RESULTS",
+    "SUSTAINED_EVIDENCE",
+    "INDEPENDENT_APPLICATION",
+    # P6: the VERIFIED entry gates (shown once the skill has a SkillMirror verification).
+    "RECENT_CHECK_PASSED",
+    "VERIFIED_RESULTS",
+    "VERIFIED_EVIDENCE",
 ]
 
 # Which targets each action may concern (mirrors the feedback_action_target check, 0007).
@@ -89,6 +99,9 @@ class Recommendation(_Out):
     course_ids: tuple[UUID, ...]
     created_at: datetime
     updated_at: datetime
+    # P6: the skill's open verification session for a VERIFY / REVERIFY recommendation, if any.
+    verification_session_id: UUID | None = None
+    verification_state: VerificationState | None = None
 
 
 class RecommendationsResponse(_Out):
@@ -333,3 +346,148 @@ class ActivityResponse(_Out):
     items: list[ActivityRow]
     # Pass as `before` for the next (older) page; null on the last page.
     next_before: datetime | None
+
+
+# --- Verification Center (P6; architecture §11, §12.1, §13) ----------------------------------
+#
+# The learner-facing verification shapes. A challenge is sanitized: its answer key and rubric
+# stay server-side (verification_items is server-only) and are never part of these models.
+
+# PREPARING (PLANNED), NOT_ISSUED (no valid challenge could be generated), READY, IN_PROGRESS,
+# EVALUATING (SUBMITTED), NEEDS_REVIEW (the answer could not be graded with confidence: no
+# result, no evidence), PASSED / PARTIAL / NOT_PASSED (EVALUATED), ABANDONED.
+VerificationStatus = Literal[
+    "PREPARING",
+    "NOT_ISSUED",
+    "READY",
+    "IN_PROGRESS",
+    "EVALUATING",
+    "NEEDS_REVIEW",
+    "PASSED",
+    "PARTIAL",
+    "NOT_PASSED",
+    "ABANDONED",
+]
+
+
+class VerificationChoice(_Out):
+    key: str
+    text: str
+
+
+class VerificationCriterion(_Out):
+    criterion: str
+    met: bool
+
+
+class VerificationResult(_Out):
+    """The graded result of a verification (after evaluation only)."""
+
+    id: UUID
+    score: float = Field(ge=0, le=1)
+    passed: bool
+    outcome_signal: OutcomeSignal
+    feedback: str
+    grading_confidence: float = Field(ge=0, le=1)
+    evaluator_type: VerificationEvaluatorType
+    # Rubric grading only: which criteria the answer met.
+    criteria: list[VerificationCriterion]
+    # The VERIFICATION EvidenceEvent this result became (evidence.source_id = this result).
+    evidence_id: UUID | None
+    created_at: datetime
+
+
+class VerificationSessionSummary(_Out):
+    id: UUID
+    skill_id: UUID
+    canonical_name: str
+    course_id: UUID | None
+    state: VerificationState
+    status: VerificationStatus
+    trigger_type: RecommendationType
+    reason_code: str
+    recommendation_id: UUID | None
+    planned_difficulty: float = Field(ge=0, le=1)
+    # Known once the challenge is issued.
+    assessment_type: VerificationAssessmentType | None
+    estimated_minutes: int | None
+    failure_code: str | None
+    abandon_reason: str | None
+    created_at: datetime
+    ready_at: datetime | None
+    started_at: datetime | None
+    submitted_at: datetime | None
+    evaluated_at: datetime | None
+    abandoned_at: datetime | None
+    result: VerificationResult | None
+
+
+class VerificationChallenge(_Out):
+    """The sanitized challenge: what the learner needs to answer, nothing about the answer."""
+
+    session_id: UUID
+    item_id: UUID
+    skill_id: UUID
+    canonical_name: str
+    skill_description: str
+    assessment_type: VerificationAssessmentType
+    prompt: str
+    choices: list[VerificationChoice]
+    # mcq: whether more than one option may be selected ("select all that apply").
+    multiple_select: bool
+    estimated_minutes: int
+    max_response_chars: int
+
+
+class VerificationDetailResponse(_Out):
+    session: VerificationSessionSummary
+    # Once the learner started (IN_PROGRESS onward); null while PREPARING / READY.
+    challenge: VerificationChallenge | None
+    # The learner's own submitted answer (plain text / chosen keys), once submitted.
+    response: dict[str, str | list[str]] | None
+
+
+class VerificationBudget(_Out):
+    day: str
+    timezone: str
+    daily_limit: int
+    planned_today: int
+    remaining_today: int
+
+
+class VerificationsResponse(_Out):
+    planner_version: str
+    budget: VerificationBudget
+    preparing: list[VerificationSessionSummary]
+    ready: list[VerificationSessionSummary]
+    in_progress: list[VerificationSessionSummary]
+    pending: list[VerificationSessionSummary]
+    completed: list[VerificationSessionSummary]
+    # Not issued, needs review, abandoned: closed without a learner result.
+    closed: list[VerificationSessionSummary]
+
+
+class VerificationSubmissionRequest(BaseModel):
+    """POST /v1/verifications/{id}/submit. Send an Idempotency-Key header: a retry with the same
+    key and answer returns the stored submission; the same key with another answer is a 409."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # mcq: the chosen option keys. Every other type: the written answer.
+    selected: list[Annotated[str, StringConstraints(pattern=r"^[A-Fa-f]$")]] | None = Field(
+        default=None, max_length=6
+    )
+    answer: Annotated[str, StringConstraints(max_length=20000)] | None = None
+
+    @model_validator(mode="after")
+    def _one_kind(self) -> "VerificationSubmissionRequest":
+        if (self.selected is None) == (self.answer is None):
+            raise ValueError("send either `selected` (options) or `answer` (text)")
+        return self
+
+
+class VerificationSubmissionResponse(_Out):
+    correlation_id: str
+    # False when this is a replay of the same Idempotency-Key and answer.
+    created: bool
+    session: VerificationSessionSummary

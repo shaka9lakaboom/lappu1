@@ -20,7 +20,7 @@ export function StateCountTiles({ counts }: { counts: StateCounts }) {
           <dt className="text-xs font-medium">{MASTERY[state].label}</dt>
           <dd className="mt-1 text-2xl font-semibold tabular-nums">{counts[state]}</dd>
           {FUTURE_STATES.has(state) && counts[state] === 0 ? (
-            <p className="mt-1 text-[11px] leading-tight opacity-80">After SkillMirror checks (coming next)</p>
+            <p className="mt-1 text-[11px] leading-tight opacity-80">After a SkillMirror check</p>
           ) : null}
         </div>
       ))}

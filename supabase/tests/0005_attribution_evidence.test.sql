@@ -138,6 +138,49 @@ returns void language sql as $$
             '{}'::uuid[], 'GRADED', 'verification/test-v1', '{}'::jsonb, now());
 $$;
 
+-- A graded SkillMirror verification (migration 0008): session -> item -> result. Since 0008,
+-- VERIFICATION evidence must name its result, so the fixtures below grade one per source id.
+create function pg_temp.verification_result(p_result uuid, p_learner uuid, p_skill uuid, p_run uuid)
+returns void language plpgsql as $$
+declare
+    s uuid := gen_random_uuid();
+    i uuid := gen_random_uuid();
+begin
+    insert into public.verification_sessions (id, learner_id, skill_id, trigger_type, reason_code,
+        planned_difficulty, difficulty_min, difficulty_max, plan_day, plan_timezone, planner_version,
+        planning_inputs)
+    values (s, p_learner, p_skill, 'VERIFY', 'REPEATED_DELEGATION_UNVERIFIED', 0.5, 0.35, 0.65,
+            current_date, 'UTC', 'verification-planner/test-v1', '{}');
+    insert into public.verification_items (id, session_id, learner_id, skill_id, assessment_type,
+        grader_type, prompt, expected_answer, rubric, difficulty, transfer_distance, estimated_minutes,
+        generator_version, prompt_version, generation_model_run_id, generation_attempt, prompt_fingerprint,
+        validator_version, validation)
+    values (i, s, p_learner, p_skill, 'short_response', 'RUBRIC_AI',
+            'Explain when a LEFT JOIN keeps rows that an INNER JOIN drops.', 'Unmatched left rows.',
+            '[{"criterion": "Names the unmatched rows", "points": 1}]', 0.5, 'medium', 3,
+            'verification-generator/test-v1', 'verification-generation/v1', p_run, 1, repeat('f', 64),
+            'verification-validator/test-v1', '{}');
+    update public.verification_sessions set state = 'READY', ready_at = now() where id = s;
+    update public.verification_sessions set state = 'IN_PROGRESS', started_at = now() where id = s;
+    update public.verification_sessions
+       set state = 'SUBMITTED', submitted_at = now(), submitted_response = '{"answer": "graded answer"}',
+           submission_idempotency_key = 'k-' || s, submission_request_hash = repeat('c', 64)
+     where id = s;
+    insert into public.verification_results (id, item_id, session_id, learner_id, skill_id, response,
+        score, pass, outcome_signal, outcome, evaluation, feedback, grading_confidence, evaluator_type,
+        evaluator_version, evaluator_model_run_id, evaluator_prompt_version, policy_snapshot)
+    values (p_result, i, s, p_learner, p_skill, '{"answer": "graded answer"}', 1, true, 'CORRECT', 1,
+            '{}', 'Correct.', 0.85, 'AI_RUBRIC', 'evaluator/test-v1', p_run,
+            'verification-evaluation/v1', '{}');
+    update public.verification_sessions set state = 'EVALUATED', evaluated_at = now() where id = s;
+end;
+$$;
+select pg_temp.verification_result(('58000000-0000-4000-8000-00000000000' || n)::uuid,
+                                   '00000000-0000-4000-8000-0000000005a1',
+                                   '50000000-0000-4000-8000-000000000001',
+                                   '53000000-0000-4000-8000-000000000001')
+  from unnest(array[1, 3, 4, 6]) as n;
+
 -- Schema ------------------------------------------------------------------
 select has_table('public', 'attributions', 'attributions exists');
 select has_table('public', 'evidence_events', 'evidence_events exists');

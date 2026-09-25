@@ -3,7 +3,7 @@
 This record carries live implementation status (architecture §0.1). It must never
 claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisions:
 [`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A, 0004 free-tier ModelGateway,
-0005 P3B + P4, 0006 P5).
+0005 P3B + P4, 0006 P5, 0007 P6).
 
 **Last updated:** 2026-09-25
 
@@ -25,28 +25,64 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1, P2 + P3A and P3B + P4 are merged. **`main` = `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8`** (merge of PR #4). |
+| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4 and P5 are merged. **`main` = `a0e6982546c82bb4dbb1920894fb6d4711ccfa34`** (merge of PR #5). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
 | P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
-| Development branch | `skillmirror-p5-student-experience` (P5, from `ab2d73d`) |
-| Previous branch | `skillmirror-p3b-p4-evidence-mastery-debt` (merged in PR #4) |
+| P5 merge commit | `a0e6982546c82bb4dbb1920894fb6d4711ccfa34` (PR #5, head `0f12dc7`) |
+| Development branch | `skillmirror-p6-verification-loop` (P6, from `a0e6982`) |
+| Previous branch | `skillmirror-p5-student-experience` (merged in PR #5) |
 | P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | P2 + P3A commits (merged) | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
 | CI (P3B + P4) | green on the PR #4 head before the merge |
 | CI (P2 + P3A) | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P5 → `main`: opened after CI is green; **not merged** by the agent. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
+| Pull request | P6 → `main`: opened after the hosted acceptance (PASS) and a green CI; **not merged** by the agent. P5: PR #5, **merged** as `a0e6982`. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
-**Current phase: P5 — Complete Student Experience** (dashboard, Skill Map, Skill Detail with
+**Current phase: P6 — Verification Loop.** Branch `skillmirror-p6-verification-loop` from `main`
+`a0e6982` (the P5 merge). Its migration is **`0008_verification.sql`**. Hosted has **0001–0008**
+(0008 pushed 2026-09-25 with the owner's explicit approval, "0008 only", and verified read-only).
+Decisions: [ADR 0007](decisions/0007-p6-verification-loop.md). **P7 will be migration `0009`.**
+**Status: COMPLETE ON THE BRANCH. Local acceptance PASS; hosted migration 0008 PASS; hosted real
+acceptance PASS on `gemini-3.5-flash-lite` (1 generation, 0 evaluation, 0 embedding requests) —
+the REAL LIVE PROOF case (see *Hosted acceptance P6*). Pull request open, not merged.**
+
+```
+VERIFY / REVERIFY recommendation -> planner (no model call) -> PLANNED -> 1 VERIFICATION_GENERATION
+  -> validator -> READY -> start/resume -> submit (stored, idempotent) -> deterministic grade
+  (or rubric evaluation) -> result + VERIFICATION EvidenceEvent + EVALUATED (one transaction)
+  -> recompute_ledger -> refresh_recommendations
+```
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| Migration 0008 applies from a clean reset; 0001–0007 unchanged | PASS (local) | `supabase db reset` 0001–0008; pgTAP compares the applied statements of 0001–0007 with the hosted ones; git blob ids pinned |
+| pgTAP 0008 (lifecycle, transitions, RLS, grants, uniqueness, evidence ↔ result, ledger guard, server-only items) | PASS: 79 | `supabase/tests/0008_verification.test.sql`; total 288 |
+| Planner only from VERIFY / REVERIFY; budget 2/day; cooldowns; idempotent | PASS | `test_verification_planner.py`, `test_verification_db.py` |
+| Generator + validator (skill, band, prerequisites, duplicates, code/sql, answer key, ≤ 3 attempts, cache) | PASS | `test_verification_validator.py`, `test_verification_generator.py`, DB regeneration tests |
+| Deterministic graders; rubric evaluator (repair once, untrusted → no evidence, 429/503 deferral) | PASS | `test_verification_grading.py`, DB tests |
+| Result → exactly one VERIFICATION EvidenceEvent; never a direct ledger write | PASS | DB tests (ledger unchanged until recompute), pgTAP guard |
+| VERIFIED gates; one isolated failure keeps VERIFIED; stale / contradicted → NEEDS_REVERIFICATION | PASS | `test_mastery_verification.py` |
+| Debt 0.2 / 0.6 / 1.0; no debt without delegation | PASS | `test_debt_verification.py`, DB + acceptance |
+| Replay / crash safety (duplicate start/submit/jobs, crash before/after evidence, backpressure, budget) | PASS | `test_verification_db.py` |
+| Security (own rows only, no answer key before grading, clients cannot write, anon nothing) | PASS | pgTAP + DB tests |
+| Local acceptance (fake provider) + browser walkthrough | **PASS**: 15/15 + 1 passed | `scripts/acceptance_p6.py`, `e2e/p6-acceptance.spec.ts` |
+| Hosted migration 0008 | **PASS**: pushed with the owner's approval; catalog, RLS, grants, dropped P4-era constraint, triggers, functions, indexes, checks, policy key and unchanged rows verified | See *Database* |
+| Hosted real acceptance (1 Flash-Lite generation, 0 evaluation, 0 embedding) | **PASS**: 12/12 + browser walkthrough; **REAL LIVE PROOF** (the live pass alone met every VERIFIED gate; no evidence was added after it) | See *Hosted acceptance P6* |
+| Real P3B/P4 learner untouched | PASS | Row hash `07a84e5a…` identical before the push, after verify and after cleanup |
+| CI + pull request | on the pushed branch head; the PR is opened after CI is green and not merged by the agent | — |
+
+### Previous phase: P5 (merged in PR #5, `a0e6982`)
+
+**P5 — Complete Student Experience** (dashboard, Skill Map, Skill Detail with
 "Why?", enriched Activity, corrections, deterministic recommendations). Branch
-`skillmirror-p5-student-experience` from `main` `ab2d73d`. Decisions:
+`skillmirror-p5-student-experience` from `main` `ab2d73d`, merged in PR #5 as `a0e6982`. Decisions:
 [ADR 0006](decisions/0006-p5-student-experience.md).
-**Status: COMPLETE. MIGRATIONS 0001–0007 ON HOSTED (0007 pushed 2026-09-25 with the owner's
-approval, verified read-only). The local acceptance and the hosted acceptance PASSED with 0
-generation and 0 embedding requests.** P6 verification will be **0008**; nothing in P6 was started.
+**Status: COMPLETE and MERGED. MIGRATIONS 0001–0007 ON HOSTED (0007 pushed 2026-09-25 with the
+owner's approval, verified read-only). The local acceptance and the hosted acceptance PASSED with 0
+generation and 0 embedding requests.**
 
 ```
 GET /v1/ledger · GET /v1/skills/{id} · GET /v1/activity · GET /v1/recommendations  (read, explain)
@@ -161,8 +197,10 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - The owner decided not to spend more 3.7 requests waiting for capacity.
   - The same ModelGateway pipeline has passed against another supported real Gemini model, so
     this provider outage is not a product blocker.
-- The free tier is unchanged: 20 generation requests per day and 5 per minute, per project and
-  model, reset at midnight Pacific. No billing or paid tier was used.
+- No billing or paid tier was used. *(Corrected 2026-09-25: this record used to say "20
+  generation requests per day and 5 per minute" for every model. That is the limit of
+  `gemini-3.7-flash` / `gemini-3.8-flash` only; see *Gemini free-tier limits* below for the
+  owner-verified, dated values per model.)*
 
 | Gate | State | Evidence |
 | --- | --- | --- |
@@ -192,7 +230,24 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 
 ## Database
 
-- Latest migration: **`0007_student_experience.sql`** (ADR 0006), **on hosted since 2026-09-25**:
+- Latest migration: **`0008_verification.sql`** (ADR 0007), **on hosted since 2026-09-25**:
+  - enums `verification_state` (PLANNED, READY, IN_PROGRESS, SUBMITTED, EVALUATED, ABANDONED),
+    `verification_assessment_type`, `verification_grader_type` (MCQ_EXACT, NUMERIC_TOLERANCE,
+    RUBRIC_AI), `verification_evaluator_type` (DETERMINISTIC, AI_RUBRIC)
+  - `verification_sessions`: the lifecycle with its legal transitions (guard triggers), the
+    stored submission (response, idempotency key, request hash, `submitted_at`) before any
+    grading, one open session per learner and skill, and a unique submission key
+  - `verification_items`: **server-only** (no client grant, no policy); the expected answer and
+    rubric live here; append-only
+  - `verification_results`: written only by the grading completion; immutable
+  - `evidence_events_verification_guard`: VERIFICATION evidence needs a real result
+    (`source_id = result.id`) of the same learner, skill and course
+  - `skill_ledger_verification_guard` replaces the dropped 0006 constraint
+    `skill_ledger_no_verification_states_before_p6` (the only change to an earlier object)
+  - policy key `verification` (planner, difficulty, generation, grading, reverification)
+  - RLS on all three; learners SELECT their own sessions and results; no client writes; the six
+    guard functions are not executable by clients.
+- Previous: **`0007_student_experience.sql`** (ADR 0006), **on hosted since 2026-09-25**:
   - enums `feedback_action` (WRONG_SKILL, DONT_COUNT, EVALUATION), `feedback_target_type`
     (EVIDENCE_EVENT, SKILL_MAPPING, ACTIVITY_SEGMENT, SKILL, RECOMMENDATION), `feedback_verdict`,
     `recommendation_type` (NO_ACTION, PRACTICE, VERIFY, PREREQUISITE, REVERIFY),
@@ -242,7 +297,7 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - qualification floors 0.60
   - processing unit: 4 context messages, 120 s pairing window
   - skill graph 30–60 skills (hard 20–80), default importance 0.5
-- pgTAP: `0001` (13), `0002` (33), `0003` (49), `0004` (10), `0005` (40), `0006` (15), `0007` (49) = **209**.
+- pgTAP: `0001` (13), `0002` (33), `0003` (49), `0004` (10), `0005` (40), `0006` (15), `0007` (49), `0008` (79) = **288**.
 - **`0004_model_gateway_cache.sql` (ADR 0004)** is additive:
   - `model_runs.cache_key` and `model_runs.cache_source_run_id`, both nullable
   - two checks on those columns: a cache key only on `SUCCEEDED` rows; a cache hit is a
@@ -250,8 +305,34 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - a cache lookup index and a provider-request (budget) index
 - **Migration numbering:** `0004` is the free-tier ModelGateway/cache optimisation; P3B is
   `0005` and P4 is `0006`. **P5 (feedback + recommendations) is `0007`; P6 verification is
-  `0008`.**
-- Hosted: **`0001`–`0007` applied.**
+  `0008`; P7 will be `0009`.**
+- Hosted: **`0001`–`0008` applied.**
+  - **Migration 0008** was pushed on 2026-09-25 with the owner's explicit approval ("Approved:
+    0008 only"), with `npx supabase@2.117.0 db push --linked`.
+    - Before the push:
+      - the final dry run listed exactly `0008_verification.sql`
+      - 0001–0007 had the git blob ids of `main` `a0e6982`
+      - the linked ref `lrjoexzlcadfoyciydkn` was unchanged and equal to the backend
+        `SUPABASE_URL`, `DATABASE_URL` and the web `NEXT_PUBLIC_SUPABASE_URL`
+      - a snapshot (row counts + content hashes) of the existing tables and a hash of the real
+        P3B/P4 learner's rows were taken
+    - Verified after the push, before any acceptance (read-only, a `READ ONLY` transaction):
+      - `migration list --linked`: local = remote for 0001–0008
+      - the 3 tables exist; RLS is on for every public table (26)
+      - the 4 enums have the contract labels
+      - grants: `authenticated` SELECT only on `verification_sessions` and
+        `verification_results`; **nothing on `verification_items`**; `anon` nothing
+      - policies `verification_sessions_select_own` and `verification_results_select_own`
+        (`auth.uid() = learner_id`); no policy on the items
+      - `skill_ledger_no_verification_states_before_p6` is gone
+      - the 8 triggers exist; the 6 new functions cannot be executed by `anon`/`authenticated`
+      - the partial unique `verification_sessions_one_active_key` and
+        `verification_sessions_submission_key`, and all 10 P6 checks
+      - `policy_config.verification` equals the seeded value; 11 policy keys in total
+      - the new tables were empty; every existing table had its row count and content hash from
+        before the push (only `policy_config` gained its one new row; the 10 older rows are
+        identical); the real learner's hash was unchanged
+    - Security advisors: still only the pre-existing Auth WARN.
   - **Migration 0007** was pushed on 2026-09-25 with the owner's explicit approval.
     - Before the push:
       - the final dry run listed only `0007_student_experience.sql`
@@ -323,6 +404,28 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   Security advisors: one WARN, *Leaked Password Protection Disabled*. This is an Auth project
   setting, not from the migrations.
 
+## Gemini free-tier limits (owner-verified in Google AI Studio on 2026-09-25)
+
+These are **dated operational limits** of this project's free tier, not architecture assumptions:
+Google can change them, so recheck before a live run. Billing / paid tier stays **off**.
+
+| Model | RPM | TPM | RPD | Role |
+| --- | --- | --- | --- | --- |
+| `gemini-3.5-flash-lite` | 15 | 250K | **500** | hackathon operational runtime (environment override only) |
+| `gemini-3.7-flash` | 5 | 250K | 20 | architecture / committed default |
+| `gemini-3.8-flash` | 5 | 250K | 20 | second fallback |
+| `gemini-embedding-2` | 100 | 30K | 1000 | embeddings |
+
+- The architecture / default generation model remains **`gemini-3.7-flash`** (code,
+  `.env.example`, ADRs). The code's default budget (`MODEL_DAILY_REQUEST_LIMITS=
+  gemini-3.7-flash=20,gemini-3.8-flash=20`, reserve 2) matches that default.
+- The hackathon runtime override (never committed): `GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite`
+  and/or `GEMINI_ROUTINE_MODEL=gemini-3.5-flash-lite`, `GEMINI_GENERATION_RPM=12`,
+  `MODEL_DAILY_REQUEST_LIMITS=gemini-3.5-flash-lite=500,gemini-3.7-flash=20,gemini-3.8-flash=20`,
+  `MODEL_QUOTA_RESERVE=25`.
+- Quotas are per project and model and reset at midnight Pacific. Every provider request counts
+  toward the local budget, including 429/503 responses.
+
 ## Intelligence configuration
 
 | Item | Value |
@@ -335,13 +438,111 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 | Embedding input versions | `skill-embedding-text/v1`, `retrieval-query/v1` |
 | Analysis / mapper version | `p3a-v1` (both modes) / `mapper/p3a-turn-v1` (combined), `mapper/p3a-v1` (staged) |
 | P3B / P4 versions | attribution `p3b-v1` (idempotency key), `attributor/p3b-v1`, qualifier `evidence/p3b-v1`, ledger `ledger/p4-v1` |
-| Deterministic stages (no model call) | evidence strength = base × (0.75 + 0.5 d) × independence × min(mapping, attribution); mastery weighted Beta(1,1), recency half-life 180 d in whole UTC days, UNKNOWN below support 1.0; debt eligible at ≥ 2 recent (30 d) accepted high-confidence AI/SHARED delegations; `100 × pressure × gap × importance × confidence × 0.6` before P6; actionable ≥ 15 |
+| Deterministic stages (no model call) | evidence strength = base × (0.75 + 0.5 d) × independence × min(mapping, attribution); mastery weighted Beta(1,1), recency half-life 180 d in whole UTC days, UNKNOWN below support 1.0; debt eligible at ≥ 2 recent (30 d) accepted high-confidence AI/SHARED delegations; `100 × pressure × gap × importance × confidence × factor`, the verification factor 0.6 unverified (the only value before P6) / **0.2 recently passed / 1.0 failed** (P6); actionable ≥ 15 |
 | Turn execution | `TURN_ANALYSIS_MODE=combined` (default): retrieval → 1 `TURN_ANALYSIS` call → gate → ≤ 1 adjudication; `staged` selectable |
-| Routing policy | `architecture-default` (everything on `GEMINI_GENERATION_MODEL`); `free-tier` when `GEMINI_ROUTINE_MODEL` is set (routine turn tasks on it; graph and adjudication on the default model) |
-| Request budget | `MODEL_DAILY_REQUEST_LIMITS=gemini-3.7-flash=20,gemini-3.8-flash=20`, `MODEL_QUOTA_RESERVE=2`, quota day midnight Pacific; deferral outcome `MODEL_BUDGET_RESERVE` |
+| Routing policy | `architecture-default` (everything on `GEMINI_GENERATION_MODEL`); `free-tier` when `GEMINI_ROUTINE_MODEL` is set (routine tasks on it - the turn tasks, attribution and, since P6, `VERIFICATION_GENERATION` / `VERIFICATION_EVALUATION`; graph and adjudication on the default model) |
+| Request budget | code default `MODEL_DAILY_REQUEST_LIMITS=gemini-3.7-flash=20,gemini-3.8-flash=20`, `MODEL_QUOTA_RESERVE=2` (the architecture-default models); hackathon runtime adds `gemini-3.5-flash-lite=500` with reserve 25 (see *Gemini free-tier limits*); quota day midnight Pacific; deferral outcome `MODEL_BUDGET_RESERVE` |
 | Result cache | exact key (provider, model, task, prompt version, input hash); memory + durable (`model_runs`) for structured output, memory for query vectors; hits logged with `cache_source_run_id` |
-| Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE` |
+| Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE`, **P6:** `GENERATE_VERIFICATION`, `GRADE_VERIFICATION` (entity: the verification session) |
+| P6 versions | prompts `verification-generation/v1`, `verification-evaluation/v1` (both ROUTINE tasks); planner `verification-planner/p6-v1`, generator `verification-generator/p6-v1`, validator `verification-validator/p6-v1`, graders `grader/mcq-exact-v1`, `grader/numeric-tolerance-v1`, `grader/short-exact-v1`, evaluator `evaluator/rubric-ai-v1`, evidence `verification/p6-v1`; ledger **`ledger/p6-v1`**, recommendations **`recommendations/p6-v1`** |
 | P5 versions (no model call) | recommendations `recommendations/p5-v1` (Engine 16: REVERIFY → VERIFY (actionable debt, max 2 active) → PREREQUISITE (EMERGING prerequisite) → PRACTICE → NO_ACTION); explanation codes + gates; debt bands NONE/LOW/MODERATE/HIGH at 15/25 |
+
+## Hosted acceptance P6 (2026-09-25): PASS on `gemini-3.5-flash-lite`, REAL LIVE PROOF
+
+Local FastAPI :8001 → hosted Supabase (0001–0008), started from `services/backend/.env` with
+`GEMINI_API_KEY=` (empty) and `WORKER_ENABLED=false`: the API itself had no ModelGateway, so
+planning, start, submit and reads made no provider request. The challenge was generated by a
+separate **P6-only worker** (`acceptance_p6_hosted.py worker`, registered only for
+`GENERATE_VERIFICATION` / `GRADE_VERIFICATION`) on the real Gemini gateway with the hackathon
+runtime overrides in its process environment only (`GEMINI_GENERATION_MODEL` /
+`GEMINI_ROUTINE_MODEL=gemini-3.5-flash-lite`, `GEMINI_GENERATION_RPM=12`,
+`MODEL_DAILY_REQUEST_LIMITS=gemini-3.5-flash-lite=500,…`, `MODEL_QUOTA_RESERVE=25`; nothing
+committed). Local Next.js :3001 → hosted Supabase Auth + that backend. Script:
+`services/backend/scripts/acceptance_p6_hosted.py` (`inspect`, `prepare`, `worker`, `ready`, the
+browser walkthrough `e2e/p6-acceptance.spec.ts`, `verify`, `cleanup`). Evidence:
+`test-results/p6-hosted/` (git-ignored; ids only; the cleanup deleted the credentials).
+
+- **No new global rows.** The fixture reused the existing canonical skill *Handling exceptions
+  with try-except* (band 3, importance 0.8) of course `9440004a-a25e-4e15-94c0-17c21f6bd695`.
+  Registry and course overlay (nodes / edges / aliases / course skills) stayed 29 / 66 / 77 / 29.
+- **One disposable learner**, signed up through hosted Auth (real JWT), seeded with the
+  deterministic P6 fixture through the production qualification and ledger code (no model call):
+  3 independent applications at confidence 0.85 and 12 recent AI delegations.
+- **Before the verification** the ledger was DEVELOPING: mean **0.780** (< 0.80), support **2.55**
+  (< 4.0), no verification pass — every VERIFIED gate unmet. Debt 15.307 (MODERATE, actionable)
+  → P5 VERIFY recommendation.
+- **The case is the REAL LIVE PROOF**: real Gemini challenge → real validation → real submission →
+  deterministic grading → real VERIFICATION EvidenceEvent → ledger / debt / recommendation
+  recompute. The single live pass met all three VERIFIED gates by itself. The fixture design was
+  `planned` (the pre-pass evidence was sized so that one pass of a band-level item could
+  complete the gates); the fallback `complete_after_pass` — deterministic independent evidence
+  added *after* the pass — was **not used**, and no evidence was added after the live pass.
+
+| # | Check (hosted) | Result |
+| --- | --- | --- |
+| 1 | VERIFY recommendation from repeated unverified delegation | DEVELOPING, debt 15.307 MODERATE, VERIFY ACTIVE |
+| 2 | Planner creates exactly one session, no model call | 1 PLANNED session; budget day 2026-09-25 (UTC), 1 of 2 planned |
+| 3 | Real challenge generated and validated → READY | `gemini-3.5-flash-lite`, `verification-generation/v1`, **attempt 1** (no regeneration), MCQ, difficulty 0.50 in the band [0.35, 0.65], all 8 validator checks true; 1 request, 1115 tokens, 2.9 s |
+| 4 | Deterministically gradeable (no evaluation call needed) | MCQ |
+| 5 | Submission persisted, deterministic grade | `{"selected": ["A"]}` stored, then `grader/mcq-exact-v1` → PASSED, score 1.0 |
+| 6 | Submit idempotency | same key + same answer 200 (replay); same key + different answer 409 |
+| 7 | VERIFICATION EvidenceEvent, complete provenance | one event (`2186948a…`), strength 1.5; chain evidence → result → item → session → recommendation / course / skill; 1 model run |
+| 8 | Ledger recomputed → **VERIFIED**, every gate met | DEVELOPING → VERIFIED; mean 0.835, support 4.05, recent pass; `ledger_version` 1 → 2; explanation `RECENT_VERIFICATION` |
+| 9 | Debt verification factor | 15.307 → 2.504: factor 0.6 (UNVERIFIED) → 0.2 (RECENTLY_PASSED), and the evidence gap narrowed; still eligible (the delegations are unchanged), no longer actionable |
+| 10 | Recommendation refreshed | VERIFY COMPLETED → NO_ACTION `RECENTLY_VERIFIED` |
+| 11 | Job replay | `GENERATE_VERIFICATION` → `ALREADY_ISSUED`, `GRADE_VERIFICATION` → `ALREADY_EVALUATED`; 0 new rows, 0 requests |
+| 12 | Live budget | **1 VERIFICATION_GENERATION, 0 VERIFICATION_EVALUATION, 0 embedding** (Flash-Lite 5 → 6 of 500 RPD that day) |
+
+**Browser walkthrough (hosted):** 1 passed (27.2 s): dashboard VERIFY → Skill Detail (DEVELOPING)
+→ Verification Center (preparing → ready) → start → challenge → reload resumes the draft → submit →
+result with feedback → Skill Detail VERIFIED → dashboard → center (completed). 11 screenshots.
+
+**Cleanup:** the disposable learner was deleted through the Auth admin API (200); the cascade left
+0 rows in every learner-owned table (conversations, raw messages, jobs, segments, decisions,
+mappings, attributions, evidence, ledger, recommendations, the three verification tables,
+memberships, profile). The one `model_runs` row stays for budget accounting with `learner_id`
+null (the P2 FK rule). The real P3B/P4 learner (`97d8e181…`) row hash `07a84e5a…` was identical
+before the push, after verify and after cleanup. After cleanup every pre-push table had its
+original count and content except `policy_config` (+1, the `verification` key) and `model_runs`
+(+1, this generation); 0 open jobs; 0 idle-in-transaction sessions.
+
+**Incidents during the run (both fixed in the script, no product code changed):**
+- The first `prepare` lost its hosted pooler connection mid-seed ("server closed the connection
+  unexpectedly"). It left a partly seeded disposable learner and an orphaned idle-in-transaction
+  backend (the fixture's own `activity_segments` insert) that blocked the Auth admin delete. After
+  checking that backend's query, it was terminated; the partial learner was then deleted through
+  the Auth cascade (0 rows left, real learner hash unchanged, no model call). The seeding now uses
+  one connection and one transaction per turn (`ff10814`), and the rerun passed.
+- The first `verify` got 401 *token is not yet valid (iat)*: this machine's clock trailed Supabase
+  Auth by about a second and the backend checks `iat` without leeway (pre-existing P0 behaviour,
+  see *Known defects*). The script now waits 3 s after sign-in; the backend auth is unchanged.
+
+## Local acceptance P6 (2026-09-25): PASS, scripted fake provider
+
+Full local stack: local Supabase (0001–0008) → local FastAPI :8001 without `GEMINI_API_KEY` + an
+in-process worker on the scripted fake provider → local Next.js :3001. Script:
+`services/backend/scripts/acceptance_p6.py`; browser walkthrough `apps/web/e2e/p6-acceptance.spec.ts`.
+Evidence: `test-results/p6-acceptance/evidence.json` + 11 screenshots (git-ignored).
+
+| # | Check (local) | Result |
+| --- | --- | --- |
+| 1 | VERIFY recommendation from actionable debt | DEVELOPING, debt 21.69 |
+| 2 | Planner: exactly one PLANNED session, no model call | `model_runs` 216 → 216 |
+| 3 | Challenge generated, validated → READY | attempt 1, all checks true |
+| 4 | Start → IN_PROGRESS; start again resumes; no answer key exposed | PASS |
+| 5 | Submission persisted idempotently before grading | 202 / 200 replay / 409; stored SUBMITTED |
+| 6 | Deterministic MCQ grade → EVALUATED | PASSED 1.0, 0 evaluation requests |
+| 7 | VERIFICATION EvidenceEvent with complete provenance | strength 1.8 |
+| 8 | Ledger → VERIFIED | mean 0.838, support 4.175, `ledger_version` 1 → 2 |
+| 9 | Debt factor | 21.69 → 3.01 (0.2) |
+| 10 | Recommendation refresh | VERIFY COMPLETED → NO_ACTION `RECENTLY_VERIFIED` |
+| 11 | Replay | 0 new rows, 0 model requests |
+| 12 | Abandoned session | no result, no evidence, no mastery penalty |
+| 13 | Failed verification | negative evidence (mean 0.771 → 0.547), factor 1.0, delegation count unchanged |
+| 14 | Failure without delegation | no debt fabricated (not eligible, 0.0) |
+| 15 | Zero real model calls | all 4 `model_runs` from the fake provider |
+
+Browser walkthrough: 1 passed.
 
 ## Hosted acceptance P5 (2026-09-25): PASS, no model call
 
@@ -513,7 +714,8 @@ Evidence: `test-results/p2-p3a-acceptance/evidence.json` (git-ignored; ids only)
 - `GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite`
 - `MODEL_DAILY_REQUEST_LIMITS=…,gemini-3.5-flash-lite=10`. Its RPD cannot be read without OAuth
   (no `gcloud`; the Gemini API exposes no rate limits). This value is a **local spending cap**
-  for the run, with the reserve of 2, not a claim about Google's quota.
+  for the run, with the reserve of 2, not a claim about Google's quota. *(Later the same day the
+  owner read the real limit in AI Studio: 500 RPD; see *Gemini free-tier limits*.)*
 
 **Sequence and provider requests:**
 
@@ -617,14 +819,14 @@ validation item after its quota resets. The 3.7 live acceptance has **not** pass
 
 **Smoke benchmark:** the 12-case `p3a-smoke` set needs about 36 generation calls, which exceeds
 the free tier's 20/day. Its schema and scorer are covered deterministically in CI; the live run
-is deferred.
+is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 RPD, the run fits.)*
 
 ## URLs and versions (local)
 
 | Item | Value |
 | --- | --- |
-| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}`; **P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections)**) |
-| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, `GET /v1/ledger[?course_id=]` (P4, + `debt_band`), **P5: `GET /v1/skills/{id}`, `GET /v1/activity`, `POST /v1/feedback` (Idempotency-Key), `GET /v1/recommendations`**, OpenAPI `/docs` |
+| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}`; P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections); **P6: `/verifications` (Verification Center), `/verifications/{id}` (challenge, result)**) |
+| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, `GET /v1/ledger[?course_id=]` (P4, + `debt_band`), P5: `GET /v1/skills/{id}`, `GET /v1/activity`, `POST /v1/feedback` (Idempotency-Key), `GET /v1/recommendations`; **P6: `GET /v1/verifications` (plans, no model call), `GET /v1/verifications/{id}`, `POST /v1/verifications/{id}/start`, `POST /v1/verifications/{id}/submit` (Idempotency-Key), `POST /v1/verifications/{id}/abandon`**; OpenAPI `/docs` |
 | Worker | in the API process when `DATABASE_URL` + `GEMINI_API_KEY` are set; or `python -m app.jobs.worker [--once]` |
 | Deployed web / API | none, by decision (local-first) |
 | Extension version | 0.2.0, dev id `cohpimnabjigooghbigblennedbplojm` (unchanged in this phase) |
@@ -635,16 +837,18 @@ is deferred.
 | Suite | Local | CI job |
 | --- | --- | --- |
 | Backend `ruff check` + `ruff format --check` (incl. benchmark runner) | clean | Backend |
-| Backend pytest, unit (no DB) | **575 passed, 102 skipped** (P3B+P4: 481 / 84) | Backend |
-| Backend pytest, with local Postgres (after `supabase db reset`) | **677 passed** (103 `db`-marked; P3B+P4: 565 / 85) | Backend ingestion + intelligence + database |
-| Database pgTAP (after `supabase db reset`) | **209 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49) | Database |
+| Backend pytest, unit (no DB) | **747 passed, 132 skipped** (P5: 575 / 102) | Backend |
+| Backend pytest, with local Postgres (after `supabase db reset`) | **879 passed** (P5: 677) | Backend ingestion + intelligence + database |
+| Database pgTAP (after `supabase db reset`) | **288 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49 + 79) | Database |
 | P3B/P4 safety benchmark (`benchmark/runners/p3b_p4_safety.py`, 22 deterministic cases) | **22/22**; False AI Assistance Debt Rate **0/21**; debt recall 2/2 | Backend (`test_benchmark_safety.py`) |
 | Web ESLint | 0 problems | Web |
 | Typecheck (web, contracts, config, ui, extension) | 5/5 clean | Web, Extension |
-| Web vitest | **63 passed** (P4: 32) | Web |
+| Web vitest | **80 passed** (P5: 63) | Web |
 | Web production build (no env) | pass | Web |
 | Extension vitest | **78 passed** | Extension |
 | Extension build + manifest validation + Chromium (load ×2, capture → queue → sync ×1) | pass, **3 passed** | Extension |
+| Local P6 acceptance (scripted fake provider) | **PASS**: 15/15 + browser walkthrough (1 passed); 0 real model calls | not in CI by design |
+| Hosted P6 acceptance (real Gemini) | **PASS on `gemini-3.5-flash-lite`**: 12/12 + browser walkthrough; 1 generation / 0 evaluation / 0 embedding; REAL LIVE PROOF; disposable learner deleted; real learner untouched | not in CI by design |
 | Local P5 acceptance (no model call) | **PASS**: 10/10 API checks + browser walkthrough (1 passed); `model_runs` unchanged | not in CI by design |
 | Hosted P5 acceptance (no model call) | **PASS**: 12/12 + browser walkthrough; disposable learner deleted; real learner untouched; 0 generation / 0 embedding | not in CI by design |
 | Real Gemini acceptance (P3B + P4) | **PASS on `gemini-3.5-flash-lite`**: 1 TURN_ANALYSIS + 1 SKILL_ATTRIBUTION + 1 embedding; replay 0 requests | not in CI by design |
@@ -652,7 +856,8 @@ is deferred.
 | P3A smoke benchmark (`benchmark/runners/p3a_smoke.py`, 12 cases) | live run **deferred**, per the owner (about 12–16 requests in combined mode) | schema + scorer only in CI |
 | Real acceptance script (`services/backend/scripts/acceptance_p2_p3a.py`) | **passed** with `--resume-course`; prints the budget before and after; checks the identical repeat (0 provider requests) | not in CI by design |
 
-New backend test modules (ADR 0006): `test_experience_db` (18), `test_recommendations_engine`, `test_zero_model_calls`, `test_migrations_frozen`, the `p5_fixtures` seed; parity extended to the P5 enums and models. Web: `experience.test.ts`, `experience.test.tsx` (server-rendered components).
+New backend test modules (ADR 0007): `test_verification_db` (30), `test_verification_planner`, `test_verification_validator`, `test_verification_generator`, `test_verification_grading`, `test_mastery_verification`, `test_debt_verification`, the `p6_fixtures` seed; parity extended to the P6 enums, models and the A.5 `pass` alias. Web: `verification.test.ts`, `verification.test.tsx`.
+ADR 0006: `test_experience_db` (18), `test_recommendations_engine`, `test_zero_model_calls`, `test_migrations_frozen`, the `p5_fixtures` seed; parity extended to the P5 enums and models. Web: `experience.test.ts`, `experience.test.tsx` (server-rendered components).
 ADR 0005 modules: `test_attribution`, `test_evidence_qualification`, `test_mastery`,
 `test_debt`, `test_evidence_pipeline_db`, `test_ledger_api`, `test_benchmark_safety`. The P3A pipeline
 tests run the P3A stage alone (`evidence=False`).
@@ -663,7 +868,11 @@ Earlier: `test_model_gateway` (27), `test_skill_graph_unit`, `test_retrieval_sco
 
 ## CI
 
-Existing jobs are extended; no job was added. P3B + P4:
+Existing jobs are extended; no job was added. P6: the backend job runs the P6 unit tests (planner,
+validator, generator, graders, mastery/debt verification); backend integration runs
+`test_verification_db`; the database job runs pgTAP 0008; the web job runs the verification
+vitest. No job has a Gemini key: generation and evaluation use the scripted fake provider, and
+`test_zero_model_calls` pins the HTTP paths as gateway-free. P3B + P4:
 - The backend job runs the safety benchmark and the new unit tests.
 - Backend integration runs the evidence pipeline and ledger API tests.
 - The database job runs pgTAP 0005 + 0006.
@@ -683,6 +892,30 @@ auth round trip.
 
 ## Known defects and caveats
 
+- **P6, see ADR 0007 *Known limitations*:**
+  - Free-text answer keys cannot be proven correct deterministically; MCQ / numeric keys are
+    structurally checked and free text is graded against the rubric.
+  - Duplicate detection is lexical (word Jaccard + number masking, history of 5 prompts).
+  - One item per session; no adaptive or multi-item checks yet.
+  - Contradiction counts only INCORRECT independent results (≥ 2); a drift of PARTIAL results
+    lowers the mean without triggering re-verification.
+  - `GET /v1/verifications` refreshes recommendations and plans before reading (idempotent cache
+    and session writes in a GET, like P5's recommendation refresh).
+  - A timezone change mid-day can shift the daily budget by one day.
+  - **Live coverage is one MCQ challenge, deterministically graded.** The rubric evaluator
+    (`verification-evaluation/v1`), regeneration after a validator rejection and a live FAILED
+    result are proven with scripted providers (tests + local acceptance), not live.
+  - The hosted VERIFIED came from one live pass on top of a deterministic pre-pass fixture sized
+    so that one pass could meet the gates (the REAL LIVE PROOF case; nothing was added after the
+    pass). A learner with less prior evidence correctly stays below VERIFIED after one pass.
+- **Backend JWT `iat` has no leeway (pre-existing, P0 auth):** a token used within about a second
+  of issue can be rejected with 401 *token is not yet valid* when the local clock trails Supabase
+  Auth's. Seen once in the hosted P6 run; the acceptance script waits 3 s. A small leeway in the
+  token verification is the fix (not changed in P6).
+- **Hosted pooler connections can drop.** One fixture connection was closed by the server
+  mid-transaction during the hosted P6 run and left an orphaned idle-in-transaction backend. The
+  product's writes are single transactions (a dropped connection rolls back); the acceptance
+  seeding now uses one transaction per turn.
 - **P5, see ADR 0006 *Known limitations*:**
   - A learner can exclude any of their captured-activity evidence, including unfavourable
     evidence (the architecture's "don't count this"). Each correction is kept as an append-only
@@ -713,13 +946,13 @@ auth round trip.
 - **Turns processed before migration 0005** (the P2/P3A acceptance turns) have P3A rows but no
   attribution. A replay of their jobs would attribute them (1 request each); nothing does so
   automatically.
-- **Gemini free tier:** 20 generation requests/day and 5/minute per project and model. With ADR 0004 a normal turn needs 1 generation request (ambiguous: 2), and the smoke benchmark about 12–16 instead of about 36. Jobs defer instead of failing while over quota or at the budget reserve.
+- **Gemini free tier (owner-verified 2026-09-25, see *Gemini free-tier limits*):** `gemini-3.5-flash-lite` 15 RPM / 500 RPD; `gemini-3.7-flash` and `gemini-3.8-flash` 5 RPM / 20 RPD; `gemini-embedding-2` 100 RPM / 1000 RPD. With ADR 0004 a normal turn needs 1 generation request (ambiguous: 2), and the smoke benchmark about 12–16 instead of about 36. Jobs defer instead of failing while over quota or at the budget reserve.
 - **`turn-analysis/v1` is accepted live on `gemini-3.5-flash-lite`**, twice, at attempt 1 each. It has not been exercised on `gemini-3.7-flash` yet. If 3.7 ever rejects it, set `TURN_ANALYSIS_MODE=staged` (no code change).
 - **`gemini-3.7-flash` live validation is pending.** On 2026-09-25, after the quota reset, 5 of 6 requests got HTTP 503 "high demand". Every 503 counts toward the local budget, so the worker was stopped instead of letting jobs cycle.
 - **Flash-Lite graph size:** its graph has 24 skills, inside the 20–80 hard bounds but below the 30–60 target. The P1 turn "Explain binary search in one sentence." was rated low relevance (`STOP`). Both are quality observations for the P8 benchmark and calibration, not gate failures.
 - **Combined mode retrieves once per unit.** A multi-task turn shares one top-20 pool between its segments, and a non-learning turn still costs one query embedding.
 - **Query vectors are cached in memory only.** After a restart, an identical turn costs 1 embedding request; the generation still comes from the durable cache.
-- **`gemini-3.5-flash-lite` quota is unknown.** It works live on this key, but its free-tier RPD/RPM is only visible in AI Studio or Cloud Quotas (ADR 0004 §7). Routing stays off by default, and the acceptance used a local cap of 10.
+- **`gemini-3.5-flash-lite` quota** (corrected 2026-09-25): the owner read it in AI Studio: 15 RPM / 250K TPM / 500 RPD. It is the hackathon operational runtime, set in the environment only; routing stays off by default in the code, and the architecture default stays `gemini-3.7-flash`.
 - **Real-model quality is only spot-checked** (one graph, two turns). Mapping calibration and the adjudication band need the benchmark (P8).
 - Hosted Auth: *Leaked Password Protection* is disabled (advisor WARN; an owner setting).
 - Lexical scores are relative to the best match in the pool (relative score fusion). A pool of
@@ -752,20 +985,22 @@ auth round trip.
     `MODEL_DAILY_REQUEST_LIMITS` and `MODEL_QUOTA_RESERVE` in the process environment only.
   - **ADR 0006 (P5):** no new variable. P5 needs no `GEMINI_API_KEY`. The course selector
     is a UI cookie (`sm_course`), not configuration.
+  - **ADR 0007 (P6):** no new variable. The HTTP paths need no `GEMINI_API_KEY`; the worker
+    needs it for `GENERATE_VERIFICATION` (and `GRADE_VERIFICATION` of free-text answers). The
+    verification policy lives in `policy_config.verification`, not the environment.
 - Extension build (optional, public values): `SKILLMIRROR_SUPABASE_URL`, `SKILLMIRROR_SUPABASE_ANON_KEY`,
   `SKILLMIRROR_API_URL`, `SKILLMIRROR_WEB_URL`
 - Tests: `TEST_DATABASE_URL`, `REQUIRE_DB_TESTS`, `UPDATE_GOLDEN`
 
 ## Exact next action
 
-1. **Review and merge the P5 pull request** (`skillmirror-p5-student-experience` → `main`) once
-   its CI is green. The agent does not merge it.
-2. **Then P6: verification**, on a new branch from the updated `main`. Its migration is
-   **`0008`**. P6 turns VERIFY recommendations into challenges, adds the VERIFICATION source to
-   `VERIFICATION_SOURCES`, and relaxes the `skill_ledger_no_verification_states_before_p6`
-   check. The P5 engine already handles VERIFIED / NEEDS_REVERIFICATION / REVERIFY. Nothing in
-   P6 was started.
+1. **Owner: review and merge the P6 pull request** (`skillmirror-p6-verification-loop` → `main`).
+   The agent does not merge and does not start P7/P8.
+2. **After the merge: P7** on a new branch from the P6 merge commit. Its migration will be
+   **`0009`**, applied to hosted only with the owner's explicit approval.
 3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
+   - one live free-text verification (1 generation + 1 evaluation) to exercise
+     `verification-evaluation/v1` live
    - one live turn in which the learner explicitly delegates a mapped skill (AI-actor
      evidence, single delegation → no debt): about 2 requests
    - the 12-case P3A smoke benchmark: about 12–16 requests

@@ -4,7 +4,8 @@ The frozen architecture default runs every generation task on one model
 (`GEMINI_GENERATION_MODEL`, default `gemini-3.7-flash`). The hackathon free-tier
 policy is opt-in: when `GEMINI_ROUTINE_MODEL` is set (e.g. `gemini-3.5-flash-lite`),
 high-volume ROUTINE tasks - one per captured turn, plus one attribution per
-mapped segment - run on it, while the
+mapped segment, plus the P6 verification challenge generation and rubric evaluation - run
+on it, while the
 HIGH-VALUE tasks (course graph bootstrap, ambiguous-mapping adjudication) keep
 the default model and its separate per-model quota.
 
@@ -22,6 +23,8 @@ ROUTINE_TASKS = frozenset(
         "SKILL_RERANK",  # staged path
         "SKILL_MAPPING",  # staged path
         "SKILL_ATTRIBUTION",  # P3B: one per mapped segment
+        "VERIFICATION_GENERATION",  # P6: one per attempt (<= 3 per session, <= 2 sessions a day)
+        "VERIFICATION_EVALUATION",  # P6: rubric grading only where no deterministic grader applies
     }
 )
 HIGH_VALUE_TASKS = frozenset({"SKILL_GRAPH_BOOTSTRAP", "MAPPING_ADJUDICATION"})

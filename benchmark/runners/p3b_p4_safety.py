@@ -216,7 +216,12 @@ def run_case(case: dict[str, Any], policy: IntelligencePolicy) -> CaseResult:
                 )
             )
     for key, spec in case["skills"].items():
-        mastery = compute_mastery(records[key], policy.mastery, AS_OF)
+        mastery = compute_mastery(
+            records[key],
+            policy.mastery,
+            AS_OF,
+            reverification=policy.verification.reverification,
+        )
         debt = compute_debt(
             records[key], mastery, importance=spec["importance"], policy=policy.debt, as_of=AS_OF
         )

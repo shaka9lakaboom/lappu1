@@ -280,8 +280,20 @@ def test_debt_factors_only_for_eligible_debt() -> None:
         ("DEVELOPING", {"mastery_mean": 0.8, "support": 2.0}, "NEEDS_MORE_EVIDENCE"),
         ("DEVELOPING", {"mastery_mean": 0.8, "support": 3.5}, "NEEDS_INDEPENDENT_APPLICATION"),
         ("DEMONSTRATED", {"has_application": True}, "INDEPENDENT_EVIDENCE_SUPPORTS"),
-        ("VERIFIED", {}, "RECENT_VERIFICATION"),
-        ("NEEDS_REVERIFICATION", {}, "VERIFICATION_STALE"),
+        ("VERIFIED", {"recently_verified": True, "support": 4.5}, "RECENT_VERIFICATION"),
+        # Held (P6): entered through the gates at a recent check; a later isolated result
+        # lowered the estimate below the entry gate without undoing the check.
+        (
+            "VERIFIED",
+            {"recently_verified": True, "mastery_mean": 0.75, "support": 4.5},
+            "VERIFICATION_HELD",
+        ),
+        ("NEEDS_REVERIFICATION", {"verification_standing": "STALE"}, "VERIFICATION_STALE"),
+        (
+            "NEEDS_REVERIFICATION",
+            {"verification_standing": "CONTRADICTED"},
+            "VERIFICATION_CONTRADICTED",
+        ),
     ],
 )
 def test_mastery_explanation_codes(state, kwargs, code) -> None:

@@ -21,6 +21,8 @@ from psycopg import Connection
 from psycopg.types.json import Jsonb
 
 from app.experience.models import Recommendation
+from app.intelligence.mastery.engine import compute_mastery
+from app.intelligence.mastery.ledger import load_records
 from app.intelligence.policy import IntelligencePolicy
 from app.intelligence.recommendations.engine import (
     ALGORITHM_VERSION,
@@ -41,7 +43,7 @@ with scope as (
      group by cs.skill_id
 )
 select n.id, sc.importance, l.mastery_state::text, l.mastery_mean, l.support, l.debt_eligible,
-       l.debt_score, l.performance_evidence_count, l.ledger_version
+       l.debt_score, l.performance_evidence_count, l.ledger_version, l.computed_as_of
   from public.skill_nodes n
   left join scope sc on sc.skill_id = n.id
   left join public.skill_ledger l on l.skill_id = n.id and l.learner_id = %(learner)s
@@ -74,6 +76,7 @@ def load_signals(
                     from_id, state or "UNKNOWN", float(mean) if known and mean is not None else None
                 )
             )
+    reasons = reverification_reasons(conn, learner_id, rows, policy)
     default_importance = policy.skill_graph.default_importance
     signals = []
     for r in rows:
@@ -90,9 +93,31 @@ def load_signals(
                 performance_evidence_count=int(r[7]) if has_row else 0,
                 ledger_version=r[8],
                 prerequisites=tuple(prerequisites.get(r[0], ())),
+                reverification_reason=reasons.get(r[0]),
             )
         )
     return signals
+
+
+def reverification_reasons(
+    conn: Connection, learner_id: UUID, rows: list, policy: IntelligencePolicy
+) -> dict[UUID, str]:
+    """STALE / CONTRADICTED for each NEEDS_REVERIFICATION ledger row, re-derived by the mastery
+    engine from the same evidence at the row's computed_as_of (rare: only those rows)."""
+    due = {r[0]: r[9] for r in rows if r[2] == "NEEDS_REVERIFICATION"}
+    if not due:
+        return {}
+    records = load_records(conn, learner_id, list(due))
+    reasons = {}
+    for skill_id, as_of in due.items():
+        standing = compute_mastery(
+            records.get(skill_id, []),
+            policy.mastery,
+            as_of,
+            reverification=policy.verification.reverification,
+        ).verification_standing
+        reasons[skill_id] = standing if standing in ("STALE", "CONTRADICTED") else "STALE"
+    return reasons
 
 
 def _insert(conn: Connection, learner_id: UUID, d: RecommendationDecision) -> None:
@@ -181,11 +206,16 @@ with scope as (
 )
 select r.id, r.skill_id, n.canonical_name, r.type::text, r.priority, r.reason_code, r.state::text,
        r.mastery_state::text, r.related_skill_id, rn.canonical_name, r.inputs,
-       coalesce(sc.course_ids, '{}'), r.created_at, r.updated_at
+       coalesce(sc.course_ids, '{}'), r.created_at, r.updated_at, vs.id, vs.state::text
   from public.recommendations r
   join public.skill_nodes n on n.id = r.skill_id
   left join public.skill_nodes rn on rn.id = r.related_skill_id
   left join scope sc on sc.skill_id = r.skill_id
+  -- P6: the skill's open verification (at most one: verification_sessions_one_active_key).
+  left join public.verification_sessions vs
+         on r.type in ('VERIFY', 'REVERIFY') and vs.learner_id = r.learner_id
+        and vs.skill_id = r.skill_id and vs.failure_code is null
+        and vs.state in ('PLANNED', 'READY', 'IN_PROGRESS', 'SUBMITTED')
  where r.learner_id = %(learner)s and r.state = 'ACTIVE'
    and (%(course)s::uuid is null or %(course)s::uuid = any(sc.course_ids))
    and (%(skills)s::uuid[] is null or r.skill_id = any(%(skills)s::uuid[]))
@@ -232,6 +262,8 @@ def list_recommendations(
             course_ids=tuple(r[11]),
             created_at=r[12],
             updated_at=r[13],
+            verification_session_id=r[14],
+            verification_state=r[15],
         )
         for r in rows
     ]

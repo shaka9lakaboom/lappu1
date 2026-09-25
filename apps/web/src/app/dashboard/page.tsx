@@ -278,6 +278,9 @@ export default async function DashboardPage({ searchParams }: PageProps<'/dashbo
               <Link href="/activity" className="underline underline-offset-4" data-testid="activity-link">
                 Open Activity
               </Link>
+              <Link href="/verifications" className="underline underline-offset-4" data-testid="verifications-link">
+                Open the Verification Center
+              </Link>
             </CardContent>
           </Card>
         </div>

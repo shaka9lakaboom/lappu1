@@ -109,6 +109,44 @@ $$;
 
 select pg_temp.evidence('78000000-0000-4000-8000-000000000001', 1);
 
+-- The graded verification behind the verification evidence below (migration 0008 requires
+-- VERIFICATION evidence to name its result): session -> item -> result.
+insert into public.verification_sessions (id, learner_id, skill_id, trigger_type, reason_code, planned_difficulty,
+                                          difficulty_min, difficulty_max, plan_day, plan_timezone, planner_version,
+                                          planning_inputs)
+values ('79100000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000007a1',
+        '70000000-0000-4000-8000-000000000001', 'VERIFY', 'REPEATED_DELEGATION_UNVERIFIED', 0.5, 0.35, 0.65,
+        current_date, 'UTC', 'verification-planner/test-v1', '{}');
+insert into public.verification_items (id, session_id, learner_id, skill_id, assessment_type, grader_type, prompt,
+                                       expected_answer, rubric, difficulty, transfer_distance, estimated_minutes,
+                                       generator_version, prompt_version, generation_model_run_id, generation_attempt,
+                                       prompt_fingerprint, validator_version, validation)
+values ('79200000-0000-4000-8000-000000000001', '79100000-0000-4000-8000-000000000001',
+        '00000000-0000-4000-8000-0000000007a1', '70000000-0000-4000-8000-000000000001', 'short_response',
+        'RUBRIC_AI', 'Explain when a LEFT JOIN keeps rows that an INNER JOIN drops.', 'Unmatched left rows.',
+        '[{"criterion": "Names the unmatched rows", "points": 1}]', 0.5, 'medium', 3,
+        'verification-generator/test-v1', 'verification-generation/v1', '73000000-0000-4000-8000-000000000002', 1,
+        repeat('f', 64), 'verification-validator/test-v1', '{}');
+update public.verification_sessions set state = 'READY', ready_at = now()
+ where id = '79100000-0000-4000-8000-000000000001';
+update public.verification_sessions set state = 'IN_PROGRESS', started_at = now()
+ where id = '79100000-0000-4000-8000-000000000001';
+update public.verification_sessions
+   set state = 'SUBMITTED', submitted_at = now(), submitted_response = '{"answer": "graded answer"}',
+       submission_idempotency_key = 'k-verification', submission_request_hash = repeat('c', 64)
+ where id = '79100000-0000-4000-8000-000000000001';
+insert into public.verification_results (id, item_id, session_id, learner_id, skill_id, response, score, pass,
+                                         outcome_signal, outcome, evaluation, feedback, grading_confidence,
+                                         evaluator_type, evaluator_version, evaluator_model_run_id,
+                                         evaluator_prompt_version, policy_snapshot)
+values ('79000000-0000-4000-8000-000000000001', '79200000-0000-4000-8000-000000000001',
+        '79100000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-0000000007a1',
+        '70000000-0000-4000-8000-000000000001', '{"answer": "graded answer"}', 1, true, 'CORRECT', 1, '{}',
+        'Correct.', 0.85, 'AI_RUBRIC', 'evaluator/test-v1', '73000000-0000-4000-8000-000000000002',
+        'verification-evaluation/v1', '{}');
+update public.verification_sessions set state = 'EVALUATED', evaluated_at = now()
+ where id = '79100000-0000-4000-8000-000000000001';
+
 -- Verification evidence (P6 shape): not captured activity.
 insert into public.evidence_events (
     id, learner_id, skill_id, source_type, source_id, raw_message_ids, evidence_type, actor, outcome_signal,

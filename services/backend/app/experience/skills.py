@@ -237,7 +237,9 @@ def get_skill_detail(
 
     as_of = ledger.computed_as_of or datetime.now(UTC)
     records = load_records(conn, learner_id, [skill_id]).get(skill_id, [])
-    derived = compute_mastery(records, policy.mastery, as_of)
+    derived = compute_mastery(
+        records, policy.mastery, as_of, reverification=policy.verification.reverification
+    )
     by_id = {r.id: r for r in records}
     segment_ids = sorted({r[8] for r in evidence_rows if r[8] is not None})
     feedback = list_feedback(conn, learner_id, skill_id=skill_id, segment_ids=segment_ids or None)
@@ -297,6 +299,8 @@ def get_skill_detail(
             support=ledger.support,
             has_application=derived.has_application,
             policy=policy.mastery,
+            verification_standing=derived.verification_standing,
+            recently_verified=derived.recently_verified,
         ),
         support=ledger.support,
         mastery_mean=ledger.mastery_mean,
@@ -310,6 +314,8 @@ def get_skill_detail(
             support=ledger.support,
             has_application=derived.has_application,
             policy=policy.mastery,
+            verification=derived.recently_verified or derived.previously_verified,
+            recently_verified=derived.recently_verified,
         ),
         computed_as_of=ledger.computed_as_of,
         algorithm_version=ALGORITHM_VERSION,

@@ -16,6 +16,7 @@ from app.intelligence.policy import load_policy
 from app.intelligence.recommendations.service import refresh_recommendations
 from tests.conftest import api_client
 from tests.p5_fixtures import finish_turn, seed_p5_learner, seed_turn
+from tests.p6_fixtures import graded_verification
 from tests.test_courses_api import auth
 from tests.test_pipeline_db import fetch, ingest_turn
 
@@ -553,7 +554,12 @@ def test_feedback_is_authorized_and_validated(db_pool, seeded, client, make_toke
     )
     assert post_feedback(client, mine, {**body, "note": "x" * 2001}).status_code == 422
 
-    # Verification-shaped evidence (a P6 source) is not captured activity: not correctable.
+    # Verification evidence (a P6 source) is not captured activity: not correctable. Since
+    # migration 0008 it must name a real graded verification result.
+    with db_pool.connection() as conn:
+        result_id = graded_verification(
+            conn, seeded.learner_id, seeded.skills["indexing"], grading_confidence=0.85
+        )
     (verification,) = fetch(
         db_pool,
         """insert into public.evidence_events (
@@ -568,7 +574,7 @@ def test_feedback_is_authorized_and_validated(db_pool, seeded, client, make_toke
            returning id""",
         seeded.learner_id,
         seeded.skills["indexing"],
-        uuid4(),
+        result_id,
     )
     response = post_feedback(client, mine, {**body, "target_id": str(verification[0])})
     assert response.status_code == 422
@@ -629,7 +635,7 @@ def test_recommendation_queue_is_deterministic_and_scoped(
 ):
     token = make_token(seeded.learner_id)
     body = client.get("/v1/recommendations", headers=auth(token)).json()
-    assert body["algorithm_version"] == "recommendations/p5-v1"
+    assert body["algorithm_version"] == "recommendations/p6-v1"
     queue = [
         (r["skill_id"], r["type"], r["reason_code"], r["priority"]) for r in body["recommendations"]
     ]

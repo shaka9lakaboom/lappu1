@@ -249,3 +249,61 @@ export interface LedgerResponse {
   algorithm_version: string;
   skills: SkillLedgerSummary[];
 }
+
+// --- P6: verification (migration 0008; architecture §11, Appendix A.4, A.5) --------------------
+
+export const VERIFICATION_STATES = ['PLANNED', 'READY', 'IN_PROGRESS', 'SUBMITTED', 'EVALUATED', 'ABANDONED'] as const;
+export type VerificationState = (typeof VERIFICATION_STATES)[number];
+
+/** Appendix A.4. code / sql stay representable, but V1 issues none (no sandbox grader). */
+export const VERIFICATION_ASSESSMENT_TYPES = ['mcq', 'numeric', 'code', 'sql', 'short_response', 'reasoning'] as const;
+export type VerificationAssessmentType = (typeof VERIFICATION_ASSESSMENT_TYPES)[number];
+
+export const VERIFICATION_GRADER_TYPES = ['MCQ_EXACT', 'NUMERIC_TOLERANCE', 'RUBRIC_AI'] as const;
+export type VerificationGraderType = (typeof VERIFICATION_GRADER_TYPES)[number];
+
+export const VERIFICATION_EVALUATOR_TYPES = ['DETERMINISTIC', 'AI_RUBRIC'] as const;
+export type VerificationEvaluatorType = (typeof VERIFICATION_EVALUATOR_TYPES)[number];
+
+export const TRANSFER_DISTANCES = ['near', 'medium', 'far'] as const;
+export type TransferDistance = (typeof TRANSFER_DISTANCES)[number];
+
+export interface ChallengeChoice {
+  key: string;
+  text: string;
+}
+
+export interface RubricCriterion {
+  criterion: string;
+  points: number;
+}
+
+/** VERIFICATION_GENERATION structured output (Appendix A.4 + MCQ choices). Server-side only. */
+export interface VerificationGenerationOutput {
+  skill_id: string;
+  difficulty: number;
+  assessment_type: VerificationAssessmentType;
+  prompt: string;
+  choices: ChallengeChoice[];
+  expected_answer: string | null;
+  rubric: RubricCriterion[];
+  prerequisites_used: string[];
+  transfer_distance: TransferDistance;
+  estimated_minutes: number;
+}
+
+export interface CriterionResult {
+  criterion: string;
+  met: boolean;
+  evidence: string;
+}
+
+/** VERIFICATION_EVALUATION structured output (Appendix A.5) of the rubric grader. Server-side only. */
+export interface VerificationEvaluation {
+  score: number;
+  pass: boolean;
+  criterion_results: CriterionResult[];
+  confidence: number;
+  feedback: string;
+  needs_review: boolean;
+}

@@ -256,3 +256,90 @@ class LedgerResponse(BaseModel):
 
     algorithm_version: str
     skills: list[SkillLedgerSummary]
+
+
+# --- P6: verification (migration 0008; architecture §11, Appendix A.4, A.5) --------------
+
+VerificationState = Literal[
+    "PLANNED", "READY", "IN_PROGRESS", "SUBMITTED", "EVALUATED", "ABANDONED"
+]
+# Appendix A.4. code / sql stay representable, but V1 issues none (no sandbox grader).
+VerificationAssessmentType = Literal["mcq", "numeric", "code", "sql", "short_response", "reasoning"]
+VerificationGraderType = Literal["MCQ_EXACT", "NUMERIC_TOLERANCE", "RUBRIC_AI"]
+VerificationEvaluatorType = Literal["DETERMINISTIC", "AI_RUBRIC"]
+TransferDistance = Literal["near", "medium", "far"]
+
+ChallengeText = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=4000)
+]
+ChoiceKey = Annotated[str, StringConstraints(pattern=r"^[A-F]$")]
+
+
+class ChallengeChoice(BaseModel):
+    """One MCQ option (additive to Appendix A.4, which carries no option list)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: ChoiceKey
+    text: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)]
+
+
+class RubricCriterion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criterion: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=3, max_length=300)
+    ]
+    points: int = Field(ge=1, le=10)
+
+
+class VerificationGenerationOutput(BaseModel):
+    """VERIFICATION_GENERATION output (Appendix A.4 plus the MCQ `choices`). Extra fields are
+    forbidden; the deterministic validator then checks it against the plan before delivery."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    skill_id: str
+    difficulty: float = Field(ge=0, le=1)
+    assessment_type: VerificationAssessmentType
+    prompt: ChallengeText
+    choices: list[ChallengeChoice] = Field(max_length=6)
+    expected_answer: (
+        Annotated[str, StringConstraints(strip_whitespace=True, max_length=2000)] | None
+    )
+    rubric: list[RubricCriterion] = Field(max_length=10)
+    prerequisites_used: list[str] = Field(max_length=10)
+    transfer_distance: TransferDistance
+    estimated_minutes: int = Field(ge=1, le=120)
+
+    _blank_answer = field_validator("expected_answer", mode="before")(_blank_to_none)
+
+
+class CriterionResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    criterion: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)
+    ]
+    met: bool
+    evidence: Annotated[str, StringConstraints(strip_whitespace=True, max_length=600)]
+
+
+class VerificationEvaluation(BaseModel):
+    """VERIFICATION_EVALUATION output (Appendix A.5) of the rubric grader. Extra fields are
+    forbidden; the learner response it judges is untrusted data."""
+
+    # `pass` is a Python keyword: the field keeps its contract name through the alias, both in
+    # the provider schema and in the validated output the gateway caches.
+    model_config = ConfigDict(
+        extra="forbid", validate_by_name=True, validate_by_alias=True, serialize_by_alias=True
+    )
+
+    score: float = Field(ge=0, le=1)
+    passed: bool = Field(alias="pass")
+    criterion_results: list[CriterionResult] = Field(max_length=10)
+    confidence: float = Field(ge=0, le=1)
+    feedback: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=1000)
+    ]
+    needs_review: bool

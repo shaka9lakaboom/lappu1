@@ -23,7 +23,9 @@ def delegation(days=1.0, *, actor="AI", confidence=0.9, reason="SOLUTION_REQUEST
 
 def debt(records, importance=0.5):
     records = list(records)
-    mastery = compute_mastery(records, POLICY.mastery, NOW)
+    mastery = compute_mastery(
+        records, POLICY.mastery, NOW, reverification=POLICY.verification.reverification
+    )
     return compute_debt(records, mastery, importance=importance, policy=POLICY.debt, as_of=NOW)
 
 
