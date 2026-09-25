@@ -19,6 +19,8 @@ check, and one deterministic pass reaching VERIFIED after it.
     status    read only: the demo learner's VERIFY, verification sessions, ledger row
     cleanup   delete the demo learner through the Auth admin API (the normal cascade) and prove
               nothing learner-owned remains
+    answer    REHEARSAL ONLY (never in front of an audience): the open challenge's answer key,
+              read server-side, so an automated rehearsal can take the pass path
 
     cd services/backend
     .venv/Scripts/python scripts/demo_verify_fixture.py prepare
@@ -230,6 +232,21 @@ def status(_args, pool) -> int:
     return 0
 
 
+def answer(_args, pool) -> int:
+    state = json.loads(STATE.read_text(encoding="utf-8"))
+    row = p6.one(
+        pool,
+        "select s.id, i.assessment_type::text, i.expected_answer from public.verification_sessions s "
+        "join public.verification_items i on i.session_id = s.id "
+        "where s.learner_id = %s and s.state in ('READY', 'IN_PROGRESS') order by s.created_at desc",
+        state["learner_id"],
+    )
+    if row is None:
+        raise SystemExit("no READY / IN_PROGRESS check for the demo learner yet")
+    print(json.dumps({"session_id": str(row[0]), "assessment_type": row[1], "answer": row[2]}))
+    return 0
+
+
 def cleanup(args, pool) -> int:
     state = json.loads(STATE.read_text(encoding="utf-8"))
     learner = state["learner_id"]
@@ -249,7 +266,7 @@ def cleanup(args, pool) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("phase", choices=("prepare", "status", "cleanup"))
+    parser.add_argument("phase", choices=("prepare", "status", "cleanup", "answer"))
     parser.add_argument("--course", default=p6.COURSE)
     parser.add_argument("--database-url")
     parser.add_argument("--supabase-url")
@@ -271,7 +288,8 @@ def main() -> int:
     url = args.database_url or settings.database_url.get_secret_value()
     pool = create_pool(url, max_size=3)
     try:
-        return {"prepare": prepare, "status": status, "cleanup": cleanup}[args.phase](args, pool)
+        phases = {"prepare": prepare, "status": status, "cleanup": cleanup, "answer": answer}
+        return phases[args.phase](args, pool)
     finally:
         pool.close()
 
