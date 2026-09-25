@@ -19,6 +19,9 @@ from psycopg import Connection
 
 JOB_PROCESS_RAW_MESSAGE = "PROCESS_RAW_MESSAGE"
 JOB_BOOTSTRAP_COURSE_GRAPH = "BOOTSTRAP_COURSE_GRAPH"
+# P6 (ADR 0007): both keyed by the verification session (entity_type verification_session).
+JOB_GENERATE_VERIFICATION = "GENERATE_VERIFICATION"
+JOB_GRADE_VERIFICATION = "GRADE_VERIFICATION"
 
 _BASE_BACKOFF = timedelta(seconds=30)
 _MAX_BACKOFF = timedelta(minutes=30)

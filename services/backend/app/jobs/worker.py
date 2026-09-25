@@ -24,6 +24,8 @@ from psycopg_pool import ConnectionPool
 
 from app.jobs.queue import (
     JOB_BOOTSTRAP_COURSE_GRAPH,
+    JOB_GENERATE_VERIFICATION,
+    JOB_GRADE_VERIFICATION,
     JOB_PROCESS_RAW_MESSAGE,
     ClaimedJob,
     JobResult,
@@ -207,9 +209,16 @@ def build_worker(
     **kwargs: object,
 ) -> Worker:
     """The production worker: P2 course bootstrap + raw-message processing (P3A mapping,
-    P3B attribution/evidence, P4 ledger). `evidence=False` stops after P3A (tests)."""
+    P3B attribution/evidence, P4 ledger) + P6 verification generation and grading.
+    `evidence=False` stops after P3A (tests)."""
     from app.intelligence.processing.pipeline import process_raw_message_job
     from app.intelligence.skill_graph.jobs import mark_bootstrap_failed, run_bootstrap_job
+    from app.intelligence.verification.jobs import (
+        mark_generation_failed,
+        mark_grading_failed,
+        run_generation_job,
+        run_grading_job,
+    )
 
     return Worker(
         pool,
@@ -218,9 +227,17 @@ def build_worker(
             JOB_PROCESS_RAW_MESSAGE: partial(
                 process_raw_message_job, pool, gateway, mode=turn_analysis_mode, evidence=evidence
             ),
+            JOB_GENERATE_VERIFICATION: partial(run_generation_job, pool, gateway),
+            JOB_GRADE_VERIFICATION: partial(run_grading_job, pool, gateway),
         },
         failure_hooks={
             JOB_BOOTSTRAP_COURSE_GRAPH: lambda job, error, final: mark_bootstrap_failed(
+                pool, job, error, final
+            ),
+            JOB_GENERATE_VERIFICATION: lambda job, error, final: mark_generation_failed(
+                pool, job, error, final
+            ),
+            JOB_GRADE_VERIFICATION: lambda job, error, final: mark_grading_failed(
                 pool, job, error, final
             ),
         },
