@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.intelligence.attribution.engine import TASK_TYPE as ATTRIBUTION_TASK_TYPE
 from app.intelligence.mapping.engine import ADJUDICATION_TASK_TYPE, MAPPING_TASK_TYPE
 from app.intelligence.processing.turn_analysis import TASK_TYPE as TURN_TASK_TYPE
 from app.intelligence.relevance.engine import TASK_TYPE as QUALIFICATION_TASK_TYPE
@@ -398,6 +399,7 @@ def test_every_engine_generation_task_is_classified() -> None:
         MAPPING_TASK_TYPE,
         ADJUDICATION_TASK_TYPE,
         GRAPH_TASK_TYPE,
+        ATTRIBUTION_TASK_TYPE,
     }
     assert engine_tasks == ROUTINE_TASKS | HIGH_VALUE_TASKS
     assert not ROUTINE_TASKS & HIGH_VALUE_TASKS
