@@ -3,6 +3,9 @@
 The default execution is the combined turn analysis (ADR 0004): local retrieval,
 then ONE generation call, plus at most one adjudication call. The staged path is
 covered by its own provenance test.
+
+These tests run the P3A stage alone (`evidence=False`). The P3B attribution /
+evidence and P4 ledger stages that follow it are covered by test_evidence_pipeline_db.py.
 """
 
 import re
@@ -223,7 +226,7 @@ def test_learning_turn_is_one_generation_call_with_full_provenance(
         db_pool, learner, LOOP_QUESTION, "Use `for x in xs:` directly."
     )
     provider = FakeProvider(route_responder(turn=turn_choosing(LOOP_QUESTION, LOOP_SKILL)))
-    worker = build_worker(db_pool, gateway_for(db_pool, provider), batch_size=10)
+    worker = build_worker(db_pool, gateway_for(db_pool, provider), batch_size=10, evidence=False)
     worker.drain()
 
     jobs = dict(
@@ -296,11 +299,15 @@ def test_learning_turn_is_one_generation_call_with_full_provenance(
     assert all(r[4] is None for r in runs)  # both were real provider requests
     assert {seg[12], decision[6]} == {r[0] for r in runs}
 
-    # P3A never creates evidence, ledger, debt or verification rows.
+    # The P3A stage alone writes no attribution, evidence or ledger rows.
     assert fetch(
         db_pool,
-        "select count(*) from pg_tables where schemaname = 'public' and tablename in "
-        "('evidence_events', 'skill_ledger', 'attributions', 'verification_sessions')",
+        "select (select count(*) from public.attributions where learner_id = %s)"
+        " + (select count(*) from public.evidence_events where learner_id = %s)"
+        " + (select count(*) from public.skill_ledger where learner_id = %s)",
+        learner,
+        learner,
+        learner,
     ) == [(0,)]
 
 
@@ -318,7 +325,11 @@ def test_staged_mode_keeps_the_original_calls_and_provenance(
         )
     )
     worker = build_worker(
-        db_pool, gateway_for(db_pool, provider), turn_analysis_mode="staged", batch_size=10
+        db_pool,
+        gateway_for(db_pool, provider),
+        turn_analysis_mode="staged",
+        batch_size=10,
+        evidence=False,
     )
     worker.drain()
     job_id = job_for(db_pool, assistant_id, JOB_PROCESS_RAW_MESSAGE).id
@@ -355,6 +366,7 @@ def run_assistant_job(pool, provider, assistant_id, gateway=None):
         pool,
         gateway or gateway_for(pool, provider),
         job_for(pool, assistant_id, JOB_PROCESS_RAW_MESSAGE),
+        evidence=False,
     )
 
 
@@ -600,7 +612,9 @@ def test_adjudication_429_defers_and_the_resumed_job_reuses_the_turn_analysis(
             turn=[turn_choosing(LOOP_QUESTION, LOOP_SKILL, 0.7)], turn_adjudication=adjudicate
         )
     )
-    worker = build_worker(db_pool, cached_gateway_for(db_pool, provider), batch_size=10)
+    worker = build_worker(
+        db_pool, cached_gateway_for(db_pool, provider), batch_size=10, evidence=False
+    )
     worker.drain()
     job = job_for(db_pool, assistant_id, JOB_PROCESS_RAW_MESSAGE)
     assert fetch(
@@ -651,7 +665,7 @@ def test_spent_budget_defers_the_job_before_any_provider_request(
     )
     _, first = ingest_turn(db_pool, learner, LOOP_QUESTION)
     _, second = ingest_turn(db_pool, learner, "How do I loop over a dict's items?")
-    worker = build_worker(db_pool, gateway, batch_size=10)
+    worker = build_worker(db_pool, gateway, batch_size=10, evidence=False)
     worker.drain()
     states = fetch(
         db_pool,
@@ -680,7 +694,7 @@ def test_user_message_pairing_rules(db_pool, registry, new_learner) -> None:
     fresh_user, _ = ingest_turn(db_pool, learner, "A question with no reply yet", None)
     provider = FakeProvider(route_responder(turn={"segments": [turn_segment("old question")]}))
     job = job_for(db_pool, fresh_user, JOB_PROCESS_RAW_MESSAGE)
-    result = process_raw_message_job(db_pool, gateway_for(db_pool, provider), job)
+    result = process_raw_message_job(db_pool, gateway_for(db_pool, provider), job, evidence=False)
     assert (result.outcome, result.defer_seconds) == ("AWAITING_ASSISTANT", 20)
     assert provider.calls == []
 
@@ -698,7 +712,9 @@ def test_user_message_pairing_rules(db_pool, registry, new_learner) -> None:
     )
     job = job_for(db_pool, old_user, JOB_PROCESS_RAW_MESSAGE)
     assert (
-        process_raw_message_job(db_pool, gateway_for(db_pool, provider), job).outcome
+        process_raw_message_job(
+            db_pool, gateway_for(db_pool, provider), job, evidence=False
+        ).outcome
         == "NON_LEARNING"
     )
     assert fetch(
@@ -743,7 +759,7 @@ def test_orphan_assistant_and_superseded_revisions_are_skipped(
 
     def run(raw_id):
         return process_raw_message_job(
-            db_pool, gateway, job_for(db_pool, raw_id, JOB_PROCESS_RAW_MESSAGE)
+            db_pool, gateway, job_for(db_pool, raw_id, JOB_PROCESS_RAW_MESSAGE), evidence=False
         )
 
     assert run(stored[0].raw_message_id).outcome == "ORPHAN_ASSISTANT"
@@ -778,7 +794,7 @@ def test_model_outage_leaves_the_job_retryable_and_raw_data_safe(
     learner = new_learner()
     user_id, assistant_id = ingest_turn(db_pool, learner, LOOP_QUESTION)
     provider = FakeProvider(route_responder(turn=error))
-    worker = build_worker(db_pool, gateway_for(db_pool, provider), batch_size=10)
+    worker = build_worker(db_pool, gateway_for(db_pool, provider), batch_size=10, evidence=False)
     worker.drain()
     jobs = {
         row[0]: row[1:]

@@ -50,6 +50,14 @@ def _start_worker(settings: Settings) -> tuple[threading.Thread, threading.Event
         return None
     if gateway is None:  # pragma: no cover - checked above
         return None
+    from app.intelligence.policy import PolicyConfigError, verify_policy
+
+    try:
+        verify_policy(pool)
+    except PolicyConfigError as exc:
+        # Without migrations 0005/0006 every job would fail: keep them PENDING instead.
+        logger.error("worker not started: %s", exc)
+        return None
     log_model_policy(gateway, settings.turn_analysis_mode)
     worker = build_worker(
         pool,
