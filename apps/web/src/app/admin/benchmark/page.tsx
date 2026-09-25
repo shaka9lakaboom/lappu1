@@ -3,7 +3,7 @@ import { BENCHMARK_MODES, type AdminBenchmarkResponse } from '@skillmirror/contr
 import { AreaHeader, ForbiddenPanel } from '@/components/areas/area-header';
 import { EmptyState, ErrorNotice } from '@/components/experience/states';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { benchmarkLine, failedGates } from '@/lib/admin';
+import { benchmarkBreakdown, benchmarkLine } from '@/lib/admin';
 import { formatTime } from '@/lib/experience';
 import { loadArea } from '@/lib/roles';
 import { requireApiSession } from '@/lib/session';
@@ -24,7 +24,7 @@ export default async function AdminBenchmarkPage() {
         area="admin"
         current="/admin/benchmark"
         title="Benchmark"
-        description="The intelligence gate. Hard gates are zero-tolerance; quality metrics are calibration targets."
+        description="The intelligence gate. Hard gates are zero-tolerance safety and correctness checks; each stored verdict is shown as recorded, with its parts next to it."
       />
       {loaded.state === 'forbidden' ? (
         <ForbiddenPanel area="admin" />
@@ -39,7 +39,7 @@ export default async function AdminBenchmarkPage() {
           <section className="grid gap-4 md:grid-cols-3" aria-label="Latest per mode">
             {BENCHMARK_MODES.map((mode) => {
               const run = loaded.data.latest[mode];
-              const failing = run ? failedGates(run) : [];
+              const parts = run ? benchmarkBreakdown(run) : null;
               return (
                 <Card key={mode} data-testid="benchmark-latest" data-mode={mode} data-verdict={run?.verdict ?? 'NONE'}>
                   <CardHeader>
@@ -47,18 +47,51 @@ export default async function AdminBenchmarkPage() {
                     <CardDescription>{MODE_TEXT[mode]}</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-1 text-sm">
-                    {run ? (
+                    {run && parts ? (
                       <>
-                        <p className="text-lg font-semibold">{run.verdict}</p>
-                        <p>{benchmarkLine(run)}</p>
+                        <dl className="space-y-2" data-testid="benchmark-breakdown">
+                          <div>
+                            <dt className="text-xs text-muted-foreground">Safety &amp; correctness hard gates</dt>
+                            <dd
+                              className={parts.gatesOk ? 'font-medium' : 'font-medium text-destructive'}
+                              data-testid="benchmark-gates"
+                            >
+                              {parts.gates}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">Case completion</dt>
+                            <dd className="font-medium" data-testid="benchmark-completion">
+                              {parts.completion}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">Provider / transport failures</dt>
+                            <dd className="font-medium" data-testid="benchmark-provider">
+                              {parts.provider}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt className="text-xs text-muted-foreground">Stored benchmark verdict</dt>
+                            <dd className="text-lg font-semibold" data-testid="benchmark-verdict">
+                              {run.verdict}
+                            </dd>
+                          </div>
+                        </dl>
+                        {parts.note ? (
+                          <p className="text-muted-foreground" data-testid="benchmark-note">
+                            {parts.note}
+                          </p>
+                        ) : null}
                         <p className="text-muted-foreground">
-                          {run.model ?? 'scripted'} · {run.provider_requests} requests · {formatTime(run.finished_at)}
+                          {benchmarkLine(run)} · {run.model ?? 'scripted'} · {run.provider_requests} requests ·{' '}
+                          {formatTime(run.finished_at)}
                         </p>
-                        {failing.length ? (
-                          <p className="text-destructive">Hard gates failed: {failing.join(', ')}</p>
-                        ) : (
-                          <p className="text-muted-foreground">All hard gates held.</p>
-                        )}
+                        {parts.source ? (
+                          <p className="text-xs text-muted-foreground" data-testid="benchmark-source">
+                            Failure cause from the {parts.source}; the stored row keeps only the case id.
+                          </p>
+                        ) : null}
                       </>
                     ) : (
                       <p className="text-muted-foreground">No run yet.</p>
@@ -77,7 +110,9 @@ export default async function AdminBenchmarkPage() {
                     <th className="px-2 py-1 font-medium">Mode</th>
                     <th className="px-2 py-1 font-medium">Model</th>
                     <th className="px-2 py-1 font-medium">Result</th>
-                    <th className="px-2 py-1 font-medium">Verdict</th>
+                    <th className="px-2 py-1 font-medium">Hard gates</th>
+                    <th className="px-2 py-1 font-medium">Provider failures</th>
+                    <th className="px-2 py-1 font-medium">Stored verdict</th>
                     <th className="py-1 pl-2 font-medium">Finished</th>
                   </tr>
                 </thead>
@@ -90,6 +125,8 @@ export default async function AdminBenchmarkPage() {
                       <td className="px-2 py-1 text-xs">{run.mode}</td>
                       <td className="px-2 py-1 font-mono text-xs">{run.model ?? '—'}</td>
                       <td className="px-2 py-1 text-xs">{benchmarkLine(run)}</td>
+                      <td className="px-2 py-1 text-xs">{run.hard_gates_failed.length === 0 ? 'PASS' : 'FAIL'}</td>
+                      <td className="px-2 py-1 text-xs">{benchmarkBreakdown(run).provider}</td>
                       <td className="px-2 py-1 text-xs font-medium">{run.verdict}</td>
                       <td className="py-1 pl-2 text-xs">{formatTime(run.finished_at)}</td>
                     </tr>

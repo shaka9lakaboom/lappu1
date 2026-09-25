@@ -1687,9 +1687,12 @@ def regressions(metrics: dict[str, Any], model: str = LIVE_MODEL) -> list[str]:
 
 def record_run(report: Report | dict[str, Any], database_url: str) -> str:
     """Insert a run (a Report, or its saved JSON) into benchmark_runs (migration 0009). Returns
-    its id. The row holds counts, gates, metrics and case ids only: no case text, no output."""
+    its id. The row holds counts, gates, metrics, case ids and (P9) each failing case's error as
+    a code only - e.g. ModelUnavailableError(TRANSPORT) -: no case text, no output."""
     import psycopg
     from psycopg.types.json import Jsonb
+
+    from app.admin.benchmark_view import error_code
 
     data = report.as_json() if isinstance(report, Report) else report
     counts = Counter(
@@ -1731,6 +1734,11 @@ def record_run(report: Report | dict[str, Any], database_url: str) -> str:
                         "families": data["families"],
                         "failing": data["failing"],
                         "blocked": data["blocked_ids"],
+                        "errors": {
+                            r["id"]: error_code(r["error"])
+                            for r in data["results"]
+                            if r.get("error") and not r["passed"]
+                        },
                     }
                 ),
                 data["started_at"],

@@ -219,6 +219,19 @@ export interface BenchmarkRunSummary {
   code_sha: string | null;
   started_at: string;
   finished_at: string;
+  // P9 presentation, derived from the stored row; the stored verdict is never rewritten.
+  hard_gates_total: number;
+  hard_gates_failed: string[];
+  hard_gate_failure_cases: number;
+  /** Failed cases that broke no hard gate (LIVE / REPLAY: they did not complete). */
+  failed_without_hard_gate: number;
+  failing_cases: string[];
+  /** Failing case id -> error code (e.g. ModelUnavailableError(TRANSPORT)); null when not recorded. */
+  case_errors: Record<string, string> | null;
+  /** Where the error codes come from: the run report, or the saved runner report (sha256). */
+  case_errors_source: string | null;
+  /** Failing cases whose error is a provider / transport error; null when not recorded. */
+  provider_failure_cases: string[] | null;
 }
 
 export interface BenchmarkRunDetail extends BenchmarkRunSummary {

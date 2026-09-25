@@ -3,6 +3,7 @@ enrollment, model runs, benchmark runs and lookup. Every mutation is idempotent,
 model-free; the worker runs the retried / re-armed jobs on a scripted fake provider.
 """
 
+import json
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -758,6 +759,61 @@ def test_benchmark_runs_and_the_overview(db_pool, admin, client, make_token) -> 
     finally:
         with db_pool.connection() as conn:
             conn.execute("delete from public.benchmark_runs where id = %s", (run_id,))
+
+
+def test_a_stored_fail_verdict_is_shown_with_its_parts_never_rewritten(
+    db_pool, admin, client, make_token
+) -> None:
+    """P9: LIVE 71/72 FAIL with every hard gate held reads 'hard gates PASS, 1 provider /
+    transport failure, stored verdict FAIL' - and the row stays FAIL."""
+    run_id = uuid4()
+    now = datetime.now(UTC)
+    gates = json.dumps({f"g{n}": {"value": 0, "threshold": 0, "pass": True} for n in range(13)})
+    report = json.dumps(
+        {
+            "failing": ["REL-06"],
+            "blocked": [],
+            "families": {"REL": {"cases": 14, "passed": 13, "blocked": 0, "hard_failures": 0}},
+            "errors": {"REL-06": "ModelUnavailableError(TRANSPORT)"},
+        }
+    )
+    with db_pool.connection() as conn:
+        conn.execute(
+            """
+            insert into public.benchmark_runs (id, set_name, set_version, mode, provider, model,
+                                               policy_hash, case_count, passed_count, failed_count,
+                                               hard_gates, metrics, verdict, report, started_at,
+                                               finished_at)
+            values (%s, 'critical-gate', 'v1', 'LIVE', 'google', 'gemini-3.5-flash-lite', %s, 72,
+                    71, 1, %s, '{}', 'FAIL', %s, %s, %s)
+            """,
+            (run_id, "c" * 64, gates, report, now, now),
+        )
+    try:
+        headers = auth(make_token(admin))
+        listed = client.get("/v1/admin/benchmark", headers=headers).json()
+        (run,) = [r for r in listed["runs"] if r["id"] == str(run_id)]
+        assert run["verdict"] == "FAIL" and (run["passed_count"], run["case_count"]) == (71, 72)
+        assert run["hard_gates_total"] == 13 and run["hard_gates_failed"] == []
+        assert run["failed_without_hard_gate"] == 1 and run["hard_gate_failure_cases"] == 0
+        assert run["provider_failure_cases"] == ["REL-06"]
+        assert run["case_errors"] == {"REL-06": "ModelUnavailableError(TRANSPORT)"}
+        assert "report" not in run
+        detail = client.get(f"/v1/admin/benchmark/{run_id}", headers=headers).json()
+        assert detail["provider_failure_cases"] == ["REL-06"] and detail["verdict"] == "FAIL"
+        (stored,) = conn_rows(db_pool, run_id)
+        assert stored == ("FAIL", 71, 1)  # presentation never writes the row
+    finally:
+        with db_pool.connection() as conn:
+            conn.execute("delete from public.benchmark_runs where id = %s", (run_id,))
+
+
+def conn_rows(pool, run_id):
+    with pool.connection() as conn:
+        return conn.execute(
+            "select verdict::text, passed_count, failed_count from public.benchmark_runs where id = %s",
+            (run_id,),
+        ).fetchall()
 
 
 def test_course_and_skill_lookup(db_pool, registry, new_learner, admin, client, make_token) -> None:

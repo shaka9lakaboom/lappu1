@@ -107,8 +107,12 @@ test('admin: /admin/benchmark shows the recorded runs', async ({ page }) => {
   await expect(card('LIVE')).toContainText('71/72 passed (1 failed)');
   await expect(card('LIVE')).toContainText('gemini-3.5-flash-lite · 183 requests');
   for (const mode of ['DETERMINISTIC', 'REPLAY', 'LIVE']) {
-    await expect(card(mode)).toContainText('All hard gates held.');
+    await expect(card(mode).getByTestId('benchmark-gates')).toHaveText('PASS · all 13 hard gates held');
   }
+  // P9: the parts of LIVE's stored FAIL, shown next to it (never rewritten).
+  await expect(card('LIVE').getByTestId('benchmark-completion')).toHaveText('71 / 72 cases passed');
+  await expect(card('LIVE').getByTestId('benchmark-provider')).toHaveText('1 (REL-06)');
+  await expect(card('LIVE').getByTestId('benchmark-verdict')).toHaveText('FAIL');
   await expect(page.getByTestId('benchmark-runs').locator('tbody tr')).toHaveCount(3);
   await shot(page, '05-admin-benchmark');
 });

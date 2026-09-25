@@ -249,6 +249,15 @@ class BenchmarkRunSummary(BaseModel):
     code_sha: str | None
     started_at: datetime
     finished_at: datetime
+    # P9 presentation, derived from the stored row (app/admin/benchmark_view.py); never a rewrite.
+    hard_gates_total: int
+    hard_gates_failed: list[str]
+    hard_gate_failure_cases: int
+    failed_without_hard_gate: int
+    failing_cases: list[str]
+    case_errors: dict[str, str] | None
+    case_errors_source: str | None
+    provider_failure_cases: list[str] | None
 
 
 class BenchmarkRunDetail(BenchmarkRunSummary):

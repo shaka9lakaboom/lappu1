@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 from psycopg import Connection
 
+from app.admin.benchmark_view import presentation
 from app.admin.jobs import job_counts, retry_options
 from app.admin.models import (
     ERROR_PREVIEW_CHARS,
@@ -155,18 +156,23 @@ embedding_requests, code_sha, started_at, finished_at
 
 
 def _benchmark(row: tuple) -> BenchmarkRunSummary:
+    """A summary from `_BENCHMARK_COLUMNS, report`: the stored fields plus their presentation."""
     keys = [k.strip() for k in _BENCHMARK_COLUMNS.replace("::text", "").split(",")]
-    return BenchmarkRunSummary(**dict(zip(keys, row, strict=True)))
+    fields = dict(zip(keys, row[:-1], strict=True))
+    return BenchmarkRunSummary(
+        **fields,
+        **presentation(fields["id"], fields["failed_count"], fields["hard_gates"], row[-1] or {}),
+    )
 
 
 def list_benchmark_runs(conn: Connection, limit: int = 20) -> AdminBenchmarkResponse:
     rows = conn.execute(
-        f"select {_BENCHMARK_COLUMNS} from public.benchmark_runs "  # noqa: S608 - constant columns
+        f"select {_BENCHMARK_COLUMNS}, report from public.benchmark_runs "  # noqa: S608 - constant columns
         "order by created_at desc, id desc limit %s",
         (limit,),
     ).fetchall()
     latest_rows = conn.execute(
-        f"select distinct on (mode) {_BENCHMARK_COLUMNS} from public.benchmark_runs "  # noqa: S608
+        f"select distinct on (mode) {_BENCHMARK_COLUMNS}, report from public.benchmark_runs "  # noqa: S608
         "order by mode, created_at desc, id desc"
     ).fetchall()
     latest = {r[3]: _benchmark(r) for r in latest_rows}
@@ -181,7 +187,7 @@ def get_benchmark_run(conn: Connection, run_id: UUID) -> BenchmarkRunDetail | No
     ).fetchone()
     if row is None:
         return None
-    summary = _benchmark(row[:-3])
+    summary = _benchmark((*row[:-3], row[-1]))
     return BenchmarkRunDetail(
         **summary.model_dump(), prompt_versions=row[-3], policy_hash=row[-2], report=row[-1]
     )
@@ -254,7 +260,7 @@ def admin_overview(conn: Connection, settings: Settings) -> AdminOverview:
         """
     ).fetchone()
     latest = conn.execute(
-        f"select {_BENCHMARK_COLUMNS} from public.benchmark_runs "  # noqa: S608 - constant columns
+        f"select {_BENCHMARK_COLUMNS}, report from public.benchmark_runs "  # noqa: S608 - constant columns
         "order by created_at desc, id desc limit 1"
     ).fetchone()
     return AdminOverview(

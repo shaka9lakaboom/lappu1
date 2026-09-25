@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ApiError } from './api';
-import { benchmarkLine, budgetLine, failedGates, formKey, retryAction } from './admin';
+import { benchmarkBreakdown, benchmarkLine, budgetLine, failedGates, formKey, retryAction } from './admin';
 import { areaLinks, loadArea } from './roles';
 
 describe('retry actions', () => {
@@ -53,6 +53,69 @@ describe('budget and benchmark lines', () => {
         hard_gates: { false_debt: { value: 0, pass: true }, injection: { value: 1, pass: false }, x: 'bad' },
       }),
     ).toEqual(['injection']);
+  });
+});
+
+describe('benchmark breakdown (P9: the parts of a stored verdict, never a rewrite)', () => {
+  // The hosted LIVE row: 71/72, every hard gate held, REL-06 stopped by a provider transport error.
+  const live = {
+    mode: 'LIVE' as const,
+    verdict: 'FAIL' as const,
+    case_count: 72,
+    passed_count: 71,
+    blocked_count: 0,
+    hard_gates_total: 13,
+    hard_gates_failed: [],
+    failed_without_hard_gate: 1,
+    failing_cases: ['REL-06'],
+    provider_failure_cases: ['REL-06'],
+    case_errors_source: 'saved runner report live_full.json, sha256 90e600d6… (ADR 0008 §35)',
+  };
+
+  it('separates hard gates PASS, completion 71 / 72 and one transport failure from the stored FAIL', () => {
+    const parts = benchmarkBreakdown(live);
+    expect(parts.gatesOk).toBe(true);
+    expect(parts.gates).toBe('PASS · all 13 hard gates held');
+    expect(parts.completion).toBe('71 / 72 cases passed');
+    expect(parts.provider).toBe('1 (REL-06)');
+    expect(parts.note).toContain('Every safety and correctness hard gate held');
+    expect(parts.note).toContain('stays FAIL');
+    expect(parts.note).toContain('REL-06 was stopped by a provider / transport error');
+    expect(parts.source).toContain('sha256');
+  });
+
+  it('never softens a real hard-gate failure', () => {
+    const parts = benchmarkBreakdown({ ...live, hard_gates_failed: ['false_ai_assistance_debt'], failed_without_hard_gate: 0, provider_failure_cases: [] });
+    expect(parts.gatesOk).toBe(false);
+    expect(parts.gates).toBe('FAIL · 1 of 13 failed: false_ai_assistance_debt');
+    expect(parts.note).toBe('A zero-tolerance hard gate failed: this run is a real FAIL.');
+  });
+
+  it('says so when the cause of an incomplete case was not recorded', () => {
+    const parts = benchmarkBreakdown({ ...live, provider_failure_cases: null, case_errors_source: null });
+    expect(parts.provider).toBe('not recorded for this run');
+    expect(parts.note).toContain('REL-06 did not pass without breaking a hard gate');
+    expect(parts.source).toBeNull();
+  });
+
+  it('shows a clean run plainly', () => {
+    const parts = benchmarkBreakdown({
+      ...live,
+      mode: 'REPLAY',
+      verdict: 'PASS',
+      passed_count: 72,
+      failed_without_hard_gate: 0,
+      failing_cases: [],
+      provider_failure_cases: [],
+      case_errors_source: 'run report',
+    });
+    expect([parts.gates, parts.completion, parts.provider, parts.note, parts.source]).toEqual([
+      'PASS · all 13 hard gates held',
+      '72 / 72 cases passed',
+      '0',
+      null,
+      null,
+    ]);
   });
 });
 
