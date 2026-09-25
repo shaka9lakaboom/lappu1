@@ -170,6 +170,11 @@
 13. **Recency uses `occurred_at`** (the captured turn's time), not `created_at`. A job delayed
     by quota, or a later re-processing, never makes evidence look fresher. In live processing
     the two differ by seconds.
+    - `age_days` counts **whole UTC calendar days** from `occurred_at` to `as_of`. A replay or a
+      second recompute on the same day therefore re-derives exactly the same ledger row, and
+      its `ledger_version` stays.
+    - The live acceptance found this: with fractional days, a replay one minute later changed
+      α in the 6th decimal.
 
 ## Pipeline (PROCESS_RAW_MESSAGE)
 
@@ -307,6 +312,26 @@
     qualification, mastery and debt code.
     - Primary metric: the **False AI Assistance Debt Rate**, which must be 0.
     - At adoption: 22/22 passed; false debt 0 of 21 no-debt skills; debt recall 2 of 2.
+
+## Live validation (2026-09-25)
+
+Migrations 0005 + 0006 were pushed to hosted with the owner's approval and verified
+read-only: migration list, RLS, grants, policies, the 4 policy keys, constraints and enums.
+Then one controlled turn ran on `gemini-3.5-flash-lite` (runtime override), reusing the READY
+P2/P3A course:
+
+1. **Requests:** 1 `EMBED_QUERY` + 1 `TURN_ANALYSIS` + 1 `SKILL_ATTRIBUTION`. Both
+   generations succeeded at attempt 1, with no repair.
+2. **P3A:** one ACCEPTED mapping (*Writing for loops over sequences*, 0.90).
+3. **Attribution:** STUDENT 0.95, INDEPENDENT_APPLICATION, CORRECT, with a grounded learner
+   span.
+4. **Evidence:** `AI_ACTIVITY` with strength 0.7875 (1.0 × 0.875 × 1.0 × 0.90) and the full
+   provenance chain.
+5. **Ledger:** UNKNOWN (support 0.7875 < 1.0), debt not eligible (score 0).
+6. **Replay:** 0 requests, nothing duplicated. After the day-granularity fix (decision 13),
+   two ledger rebuilds left `ledger_version` unchanged.
+
+Full record: `docs/project-state.md` → *Live acceptance P3B + P4*.
 
 ## Expected provider requests (changes to ADR 0004's table)
 
