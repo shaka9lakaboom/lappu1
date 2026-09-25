@@ -76,3 +76,48 @@ def test_settings_read_from_environment(monkeypatch: pytest.MonkeyPatch) -> None
     settings = make_settings(app_env="staging")
     assert settings.app_name == "skillmirror-api-staging"
     assert settings.cors_origins == ["https://staging.skillmirror.dev"]
+
+
+def test_the_default_budget_covers_every_free_tier_model() -> None:
+    limits = make_settings().daily_request_limits
+    assert limits == {
+        "gemini-3.7-flash": 20,
+        "gemini-3.8-flash": 20,
+        "gemini-3.5-flash-lite": 500,
+        "gemini-embedding-2": 1000,
+    }
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"gemini_generation_model": "gemini-9-pro"},
+        {"gemini_routine_model": "gemini-9-lite"},
+        {
+            "model_daily_request_limits": "gemini-3.7-flash=20",
+            "gemini_routine_model": "gemini-3.5-flash-lite",
+        },
+    ],
+)
+def test_an_unbudgeted_generation_model_fails_at_startup(overrides) -> None:
+    """N1 (ADR 0008): a generation model without a daily limit is refused, never silently
+    unbudgeted."""
+    with pytest.raises(ValidationError, match="no daily limit"):
+        make_settings(**overrides)
+
+
+def test_the_budget_can_be_switched_off_explicitly() -> None:
+    settings = make_settings(
+        model_daily_request_limits="off", gemini_generation_model="gemini-9-pro"
+    )
+    assert settings.daily_request_limits == {}
+
+
+def test_the_demo_runtime_is_budgeted() -> None:
+    # The values scripts/demo.mjs sets.
+    settings = make_settings(
+        gemini_generation_model="gemini-3.5-flash-lite",
+        gemini_routine_model="gemini-3.5-flash-lite",
+        model_daily_request_limits="gemini-3.5-flash-lite=500,gemini-3.7-flash=20,gemini-3.8-flash=20",
+    )
+    assert settings.daily_request_limits["gemini-3.5-flash-lite"] == 500

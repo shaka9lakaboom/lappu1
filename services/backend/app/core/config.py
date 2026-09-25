@@ -19,8 +19,12 @@ from app import __version__
 AppEnvironment = Literal["development", "test", "staging", "production"]
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-# Free-tier quota observed on this project (GenerateRequestsPerDayPerProjectPerModel-FreeTier).
-DEFAULT_DAILY_REQUEST_LIMITS = "gemini-3.7-flash=20,gemini-3.8-flash=20"
+# Free-tier quota of this project, owner-verified in AI Studio on 2026-09-25 (requests per day and
+# model). Every generation model the settings name must have a limit here unless the budget is
+# off (ADR 0008, N1): an unbudgeted model would only ever be stopped by the provider's 429.
+DEFAULT_DAILY_REQUEST_LIMITS = (
+    "gemini-3.7-flash=20,gemini-3.8-flash=20,gemini-3.5-flash-lite=500,gemini-embedding-2=1000"
+)
 _ALLOWED_ORIGIN_SCHEMES = {"http", "https", "chrome-extension"}
 
 
@@ -193,6 +197,23 @@ class Settings(BaseSettings):
             ]
             if missing:
                 raise ValueError(f"APP_ENV={self.app_env} requires: {', '.join(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _require_budget_for_generation_models(self) -> "Settings":
+        limits = self.daily_request_limits
+        if not limits:  # explicitly off
+            return self
+        unbudgeted = [
+            model
+            for model in dict.fromkeys((self.gemini_generation_model, self.gemini_routine_model))
+            if model and model not in limits
+        ]
+        if unbudgeted:
+            raise ValueError(
+                f"MODEL_DAILY_REQUEST_LIMITS has no daily limit for {', '.join(unbudgeted)}: add "
+                "model=requests_per_day (the model's free-tier quota), or set it to off"
+            )
         return self
 
     @property
