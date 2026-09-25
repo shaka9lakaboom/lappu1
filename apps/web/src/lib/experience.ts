@@ -248,6 +248,28 @@ export const OUTCOME_LABEL: Record<OutcomeSignal, string> = {
   NOT_APPLICABLE: 'No result (not a performance)',
 };
 
+/**
+ * Why a recorded evidence differs from what the attributor proposed (deterministic qualification
+ * rules). Null when the evidence was recorded as proposed.
+ */
+export function qualificationNote(reason: string | null | undefined): string | null {
+  switch (reason) {
+    case 'COPIED_FROM_AI':
+      return "Your text matches an earlier AI answer in this conversation, so it counts as the AI's work.";
+    case 'AI_ACTOR_NOT_PERFORMANCE':
+      return 'The AI did this part, so it is not counted as your performance.';
+    case 'SHARED_NOT_INDEPENDENT':
+      return 'You did this together with the AI, so it counts as an assisted attempt.';
+    default:
+      return null;
+  }
+}
+
+/** The "Your words" span label; text the copy guard found in earlier AI output is not the learner's. */
+export function studentSpanLabel(reason: string | null | undefined): string {
+  return reason === 'COPIED_FROM_AI' ? 'Your text (also in an earlier AI answer)' : 'Your words';
+}
+
 export function independenceLabel(independence: number): string {
   if (independence >= 0.8) return 'Independent';
   if (independence > 0) return 'Assisted';

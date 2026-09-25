@@ -99,7 +99,7 @@ def _segments(
         select m.id, m.segment_id, m.skill_id, n.canonical_name, m.status::text, m.confidence,
                m.evidence_span, a.status::text, a.actor::text, a.confidence, a.evidence_decision,
                e.id, e.evidence_type::text, e.outcome_signal::text, coalesce(e.excluded, false),
-               e.exclusion_reason
+               e.exclusion_reason, e.actor::text, e.qualification_reason
           from public.skill_mappings m
           join public.skill_nodes n on n.id = m.skill_id
           left join lateral (
@@ -108,7 +108,8 @@ def _segments(
                order by a.created_at desc limit 1
           ) a on true
           left join lateral (
-              select e.id, e.evidence_type, e.outcome_signal, e.excluded, e.exclusion_reason
+              select e.id, e.evidence_type, e.outcome_signal, e.excluded, e.exclusion_reason,
+                     e.actor, e.qualification_reason
                 from public.evidence_events e where e.mapping_id = m.id
                order by e.created_at desc limit 1
           ) e on true
@@ -130,7 +131,12 @@ def _segments(
                 confidence=round(float(r[5]), 6),
                 evidence_span=r[6],
                 attribution_status=r[7],
-                actor=r[8],
+                # Who did it = the recorded evidence's actor (after the deterministic
+                # qualification), the same value the skill timeline and the ledger use. The
+                # attributor's own claim stays visible as attributed_actor.
+                actor=r[16],
+                attributed_actor=r[8],
+                qualification_reason=r[17],
                 attribution_confidence=round(float(r[9]), 6) if r[9] is not None else None,
                 evidence_decision=r[10],
                 evidence_id=r[11],

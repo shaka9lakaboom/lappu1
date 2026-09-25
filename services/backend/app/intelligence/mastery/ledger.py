@@ -45,7 +45,8 @@ def load_records(
         """
         select e.id, e.skill_id, e.source_type::text, e.evidence_type::text, e.actor::text,
                e.outcome_signal::text, e.outcome, e.strength, e.evidence_confidence, e.occurred_at,
-               e.excluded, a.rationale_code, s.learning_relevance::text, m.status::text
+               e.excluded, a.rationale_code, s.learning_relevance::text, m.status::text,
+               e.qualification_reason
           from public.evidence_events e
           left join public.attributions a on a.id = e.attribution_id
           left join public.activity_segments s on s.id = e.segment_id

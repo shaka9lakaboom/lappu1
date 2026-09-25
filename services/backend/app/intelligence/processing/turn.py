@@ -204,6 +204,32 @@ def recent_context(
     return [_row_to_message(r) for r in reversed(rows)]
 
 
+def earlier_assistant_texts(conn: Connection, anchor: RawMessage, limit: int) -> list[str]:
+    """The assistant messages of the anchor's conversation before it (latest revisions, newest
+    first, at most `limit`): what the copy guard compares a learner span against (ADR 0008 H8).
+    Pastes from other conversations stay undetected."""
+    if anchor.message_index is not None:
+        where, param = "m.message_index < %s", anchor.message_index
+    else:
+        where, param = "m.captured_at < %s", anchor.captured_at
+    rows = conn.execute(
+        f"""
+        select content_text from (
+            select distinct on (coalesce(m.external_message_id, m.id::text))
+                   m.content_text, m.message_index, m.captured_at
+              from public.raw_messages m
+             where m.conversation_id = %s and m.learner_id = %s and m.role = 'assistant'
+               and {where}
+             order by coalesce(m.external_message_id, m.id::text), m.revision_index desc
+        ) latest
+        order by message_index desc nulls last, captured_at desc
+        limit %s
+        """,  # noqa: S608 - `where` is one of two constants
+        (anchor.conversation_id, anchor.learner_id, param, limit),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
 def build_unit(
     conn: Connection,
     message_id: UUID,

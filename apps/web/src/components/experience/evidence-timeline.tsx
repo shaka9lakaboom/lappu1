@@ -12,6 +12,8 @@ import {
   formatTime,
   independenceLabel,
   percent,
+  qualificationNote,
+  studentSpanLabel,
 } from '@/lib/experience';
 
 type Submit = (state: FeedbackFormState, formData: FormData) => Promise<FeedbackFormState>;
@@ -76,7 +78,12 @@ export function EvidenceTimeline({ items, returnTo, submit }: { items: EvidenceT
               <summary className="cursor-pointer text-muted-foreground">Why?</summary>
               <div className="mt-2 space-y-3">
                 <dl className="space-y-2">
-                  <Span label="Your words" text={spans.student} />
+                  {qualificationNote(event.qualification_reason) ? (
+                    <p className="text-muted-foreground" data-testid="evidence-qualification">
+                      {qualificationNote(event.qualification_reason)}
+                    </p>
+                  ) : null}
+                  <Span label={studentSpanLabel(event.qualification_reason)} text={spans.student} />
                   <Span label="The AI's part" text={spans.ai} />
                   <Span label="Why it matched this skill" text={spans.mapping} />
                   {Object.entries(spans)

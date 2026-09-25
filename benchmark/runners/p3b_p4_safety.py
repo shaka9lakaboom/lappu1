@@ -213,6 +213,7 @@ def run_case(case: dict[str, Any], policy: IntelligencePolicy) -> CaseResult:
                     rationale_code=item.reason_code,
                     learning_relevance=turn["learning_relevance"],
                     mapping_status="ACCEPTED",
+                    qualification_reason=evidence.qualification_reason,
                 )
             )
     for key, spec in case["skills"].items():

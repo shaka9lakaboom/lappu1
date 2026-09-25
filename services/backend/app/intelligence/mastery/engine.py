@@ -55,7 +55,8 @@ from uuid import UUID
 from app.intelligence.policy import ZERO_STRENGTH_TYPES, MasteryPolicy, ReverificationPolicy
 
 # ledger/p6-v1: VERIFICATION evidence is active (verification standing, hold, reverification).
-ALGORITHM_VERSION = "ledger/p6-v1"
+# ledger/p8-v1: a copy-guard reclassification (COPIED_FROM_AI) is not a delegation (ADR 0008).
+ALGORITHM_VERSION = "ledger/p8-v1"
 
 # Evidence sources that count as SkillMirror-controlled verification (P6).
 VERIFICATION_SOURCES: frozenset[str] = frozenset({"VERIFICATION"})
@@ -87,6 +88,8 @@ class EvidenceRecord:
     rationale_code: str | None = None
     learning_relevance: str | None = None
     mapping_status: str | None = None
+    # The deterministic qualification's reason (e.g. COPIED_FROM_AI), not the model's.
+    qualification_reason: str | None = None
 
     @property
     def performance_bearing(self) -> bool:

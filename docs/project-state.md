@@ -514,7 +514,7 @@ Google can change them, so recheck before a live run. Billing / paid tier stays 
 | Prompt versions | `skill-graph-bootstrap/v1`, `turn-analysis/v1` + `turn-adjudication/v1` (combined, default), `relevance-intent/v1`, `skill-rerank/v1`, `skill-mapping/v1`, `mapping-adjudication/v1` (staged), **`skill-attribution/v1`** (P3B, routine task) |
 | Embedding input versions | `skill-embedding-text/v1`, `retrieval-query/v1` |
 | Analysis / mapper version | `p3a-v1` (both modes) / `mapper/p3a-turn-v1` (combined), `mapper/p3a-v1` (staged) |
-| P3B / P4 versions | attribution `p3b-v1` (idempotency key), `attributor/p3b-v1`, qualifier `evidence/p3b-v1`, ledger `ledger/p4-v1` |
+| P3B / P4 versions | attribution `p3b-v1` (idempotency key), `attributor/p3b-v1`, qualifier `evidence/p3b-v1`, ledger `ledger/p4-v1`; **P8:** `skill-attribution/v2` + `attributor/p8-v1`, qualifier `evidence/p8-v1`, ledger `ledger/p8-v1` (ADR 0008 §24–26) |
 | Deterministic stages (no model call) | evidence strength = base × (0.75 + 0.5 d) × independence × min(mapping, attribution); mastery weighted Beta(1,1), recency half-life 180 d in whole UTC days, UNKNOWN below support 1.0; debt eligible at ≥ 2 recent (30 d) accepted high-confidence AI/SHARED delegations; `100 × pressure × gap × importance × confidence × factor`, the verification factor 0.6 unverified (the only value before P6) / **0.2 recently passed / 1.0 failed** (P6); actionable ≥ 15 |
 | Turn execution | `TURN_ANALYSIS_MODE=combined` (default): retrieval → 1 `TURN_ANALYSIS` call → gate → ≤ 1 adjudication; `staged` selectable |
 | Routing policy | `architecture-default` (everything on `GEMINI_GENERATION_MODEL`); `free-tier` when `GEMINI_ROUTINE_MODEL` is set (routine tasks on it - the turn tasks, attribution and, since P6, `VERIFICATION_GENERATION` / `VERIFICATION_EVALUATION`; graph and adjudication on the default model) |
@@ -1026,6 +1026,18 @@ auth round trip.
 
 ## Known defects and caveats
 
+- **Attribution / evidence consistency (hosted, 2026-09-25) — fixed on the branch, hosted
+  remediation pending** (ADR 0008 §24–26). A learner's own loop + explanation, checked by the AI,
+  showed "Actor: You" next to "The AI did it", then a high reliance signal, VERIFY and a READY check.
+  Cause: the copy guard (the loop was in an earlier AI answer) recorded the evidence as the AI's; the
+  activity chip showed the attributor's claim instead; the reclassified evidence counted as a second
+  delegation (false debt); the attributor was never told which text was reused, so the learner's
+  explanation was lost. Fixed: activity actor = evidence actor (+ `attributed_actor`,
+  `qualification_reason`); `ledger/p8-v1` (a copy-guard reclassification is not a delegation);
+  `skill-attribution/v2` (reused text listed; own explanation quoted). Hosted: nothing written. After
+  the merge and a restart on the fixed code: `scripts/recompute_skill.py` for learner `8afbd2c8…` /
+  skill `2761328b…` (dry run: debt 30.1 → 0, delegations 2 → 1), then `--apply` with the owner's
+  approval.
 - **P6, see ADR 0007 *Known limitations*:**
   - Free-text answer keys cannot be proven correct deterministically; MCQ / numeric keys are
     structurally checked and free text is graded against the rubric.

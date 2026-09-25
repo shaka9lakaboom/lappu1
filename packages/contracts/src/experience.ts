@@ -242,7 +242,12 @@ export interface ActivityMappedSkill {
   confidence: number;
   evidence_span: string | null;
   attribution_status: AttributionStatus | null;
+  /** The recorded evidence's actor (after qualification); null when no evidence was recorded. */
   actor: EvidenceActor | null;
+  /** The attributor's claim before qualification. */
+  attributed_actor: EvidenceActor | null;
+  /** QUALIFIED, COPIED_FROM_AI, ...; null without evidence. */
+  qualification_reason: string | null;
   attribution_confidence: number | null;
   evidence_decision: string | null;
   evidence_id: string | null;

@@ -163,7 +163,7 @@ def test_mapped_turn_becomes_typed_evidence_with_complete_provenance_and_a_ledge
     assert [(r[1], r[2]) for r in runs] == [
         ("EMBED_QUERY", "retrieval-query/v1"),
         ("TURN_ANALYSIS", "turn-analysis/v1"),
-        ("SKILL_ATTRIBUTION", "skill-attribution/v1"),
+        ("SKILL_ATTRIBUTION", "skill-attribution/v2"),
     ]
     attribution_run = runs[2][0]
 
@@ -196,7 +196,7 @@ def test_mapped_turn_becomes_typed_evidence_with_complete_provenance_and_a_ledge
     assert loop[10] == pytest.approx(0.91, abs=1e-6) and loop[11] == pytest.approx(0.9, abs=1e-6)
     assert loop[12] == pytest.approx(0.9, abs=1e-6)
     assert loop[29] == {"student": LOOP_CODE, "ai": None, "mapping": STUDENT_TURN[:40]}
-    assert loop[30] == "evidence/p3b-v1" and loop[31] is False
+    assert loop[30] == "evidence/p8-v1" and loop[31] is False
 
     index = by_skill[index_id]
     # Exposure/observation: no strength, no outcome - reading the AI answer is not mastery.
@@ -207,7 +207,7 @@ def test_mapped_turn_becomes_typed_evidence_with_complete_provenance_and_a_ledge
         assert r[13] == [user_id, assistant_id] == r[26]
         assert r[15] == "AI_ACTIVITY" and r[16] is True
         assert r[17:20] == ("ATTRIBUTED", r[2], "EVIDENCE_CREATED")
-        assert r[20] == attribution_run and r[21] == "skill-attribution/v1"
+        assert r[20] == attribution_run and r[21] == "skill-attribution/v2"
         assert r[22] == "ACCEPTED" and r[23] and r[24] and r[25]
         assert set(r[14]) == {r[27], r[28], attribution_run}  # turn run, query run, attribution run
 
@@ -341,6 +341,54 @@ def test_invalid_attribution_output_is_repaired_once_then_abstains(
         learner,
     ) == [(2,)]
     assert counts(db_pool, learner) == (2, 0, 0)
+
+
+def test_a_paste_from_an_earlier_reply_outside_the_context_window_is_the_ai_s_work(
+    db_pool, registry, new_learner
+) -> None:
+    """H8 (ADR 0008): the copy guard searches the conversation's earlier assistant messages, not
+    only the 4-message recent context. The pasted code was the AI's, eight messages earlier."""
+    learner = new_learner()
+    bootstrapped_course(db_pool, learner, registry)
+    conversation = "copy-guard-conversation"
+    code = "for position, name in enumerate(names): print(position, name)"
+    ingest_turn(
+        db_pool,
+        learner,
+        "How do I print names with positions?",
+        f"Try this: {code}",
+        conversation=conversation,
+        base_index=0,
+    )
+    for i in range(1, 4):
+        ingest_turn(
+            db_pool,
+            learner,
+            f"Unrelated question number {i}.",
+            f"Unrelated answer {i}.",
+            conversation=conversation,
+            base_index=2 * i,
+        )
+    pasted = f"I wrote this loop myself: {code}"
+    _, assistant_id = ingest_turn(
+        db_pool, learner, pasted, "Looks right.", conversation=conversation, base_index=8
+    )
+    provider = FakeProvider(
+        route_responder(
+            turn=turn_mapping(pasted, (LOOP_SKILL, 0.91)),
+            attribution=attribute_all(student_span=code),
+        )
+    )
+    job = job_for(db_pool, assistant_id, JOB_PROCESS_RAW_MESSAGE)
+    assert process_raw_message_job(db_pool, gateway_for(db_pool, provider), job).outcome == (
+        "EVIDENCE_RECORDED"
+    )
+    assert fetch(
+        db_pool,
+        "select actor::text, evidence_type::text, strength, qualification_reason, "
+        "qualifier_version from public.evidence_events where learner_id = %s",
+        learner,
+    ) == [("AI", "OBSERVATION", 0.0, "COPIED_FROM_AI", "evidence/p8-v1")]
 
 
 def test_replay_never_duplicates_evidence_or_calls(db_pool, registry, new_learner) -> None:

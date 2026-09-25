@@ -207,6 +207,8 @@ export function activityRow(overrides: Partial<ActivityRow> = {}): ActivityRow {
             evidence_span: 'for name in names',
             attribution_status: 'ATTRIBUTED',
             actor: 'STUDENT',
+            attributed_actor: 'STUDENT',
+            qualification_reason: 'QUALIFIED',
             attribution_confidence: 0.95,
             evidence_decision: 'EVIDENCE_CREATED',
             evidence_id: '55555555-5555-4555-8555-555555555555',

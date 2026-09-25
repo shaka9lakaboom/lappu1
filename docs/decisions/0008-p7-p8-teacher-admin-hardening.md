@@ -156,6 +156,65 @@ No P7 endpoint makes a model call (test_zero_model_calls loads every P7 module g
     ATTRIBUTION_VERSION (re-exported by the persist modules) so model-free readers never import
     the engines.
 
+## Attribution / evidence consistency (hosted defect, 2026-09-25)
+
+A hosted learner turn (skill "Writing for loops over ranges", 16:43 UTC) showed, for one mapped
+skill, "Actor: You" and "The AI did it" in the activity feed, "no independent evidence yet" in the
+skill view, a high reliance signal, VERIFY and a READY check. Traced read-only through every table
+(ids only in this record: learner `8afbd2c8…`, conversation `c4f799a1…`, messages `ba691ad3…` /
+`c139b497…`, segment `0d499b76…`, mapping `aeac8331…`, attribution `114b7671…`, evidence
+`91b0d433…`, recommendation `e8d6092f…`, verification session `3aa4481e…`):
+
+- The learner wrote a canonical two-line loop plus their own explanation of it and asked the AI to
+  check the explanation. The same loop was in the AI's answer to the learner's earlier "how to
+  write a for loop" turn (16:05, inside the recent context window).
+- **P3A** mapped it correctly (MAP, 0.95). **The attributor** (`skill-attribution/v1`) said
+  STUDENT / INDEPENDENT_APPLICATION / CORRECT, quoting the loop. **The qualification's copy guard**
+  found that quote in the earlier AI answer and recorded the evidence as AI / OBSERVATION /
+  `COPIED_FROM_AI` (strength 0). The paired confirmation reply played no part (it is after the
+  learner message; a replay of the qualification without the 16:05 answer gives STUDENT, 0.83).
+
+Three defects, all fixed (regression suite `tests/test_attribution_consistency_db.py`, each fix
+mutation-checked):
+
+24. **Activity actor ≠ evidence actor.** The activity chip showed the attributor's claim
+    (`attributions.actor`) beside the recorded evidence type. `GET /v1/activity` now returns the
+    recorded evidence's actor as `actor` (the value the skill timeline and the ledger use), the
+    claim as `attributed_actor`, and the `qualification_reason`; the web chip and the skill
+    timeline's "Why?" explain a reclassification ("matches an earlier AI answer in this
+    conversation"). The attribution row keeps the attributor's claim: it is immutable provenance.
+25. **A copy-guard reclassification counted as a second delegation** (`ledger/p8-v1`). The AI's
+    one answer was counted when it was produced (the 16:04 turn) and again when the learner reused
+    it, so one AI interaction made the skill debt-eligible (score 30.1, VERIFY, a planned check):
+    a false AI Assistance Debt. `is_delegation` now ignores evidence whose qualification reason is
+    `COPIED_FROM_AI`; the ledger carries `qualification_reason` for this. Missing a debt is the
+    safe direction.
+26. **The learner's own explanation was lost** (`skill-attribution/v2`, `attributor/p8-v1`). The
+    attributor was not told which text was reused, so it quoted the loop; one span per skill meant
+    the explanation never became evidence. The request now lists "Reused assistant text": the parts
+    of the learner message found (deterministically, `reused_ai_text`) in the conversation's earlier
+    assistant messages. The span rules say never to quote them, to quote the learner's own
+    explanation or reasoning instead (with its evidence type), and that asking the AI to check the
+    learner's work does not make the AI the actor. The copy guard stays the deterministic safety
+    net. Live check on `gemini-3.5-flash-lite` (synthetic text, 3 requests): own work without an
+    earlier example → STUDENT / INDEPENDENT_APPLICATION; the live shape → STUDENT /
+    INDEPENDENT_EXPLANATION quoting the explanation (strength 0.50); "how do I write a for loop?" →
+    AI / OBSERVATION, no mastery. The v1 prompt on the same synthetic input (1 request) reproduced
+    the hosted result (STUDENT quoting the loop → `COPIED_FROM_AI`). The idempotency key
+    (`p3b-v1`) is unchanged, so attributed segments are never re-attributed.
+
+The copy guard also sees the conversation's earlier assistant messages (up to 50, not only the
+4-message window) and matches an elided span piece by piece (`evidence/p8-v1`, H8).
+
+Hosted remediation (not applied; needs the owner): the hosted runtime runs `main` without these
+fixes, so a recompute now would be undone by its next recompute of the skill. After the merge and
+a restart on the fixed code, `scripts/recompute_skill.py --learner 8afbd2c8-… --skill 2761328b-…`
+(dry run by default; read-only dry run on 2026-09-25: debt eligible → not eligible, 30.1 → 0.0,
+delegations 2 → 1, `ledger/p8-v1`) and then `--apply`, which also reconciles the recommendations
+(VERIFY → superseded). The READY check `3aa4481e…` is not cancelled by any rule; leaving it lets
+the learner add genuine verification evidence. The lost explanation cannot be restored: evidence
+and attributions are immutable and the segment is already attributed.
+
 ## Web
 
 23. `/teacher`, `/teacher/courses/[id]`, `/admin`, `/admin/jobs`, `/admin/model-runs`,
