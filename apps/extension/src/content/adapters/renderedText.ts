@@ -29,7 +29,9 @@ function isHidden(element: Element): boolean {
     element.hasAttribute('hidden') ||
     element.getAttribute('aria-hidden') === 'true' ||
     element.classList.contains('sr-only') ||
-    element.hasAttribute('popover')
+    element.hasAttribute('popover') ||
+    // Chrome the provider itself leaves out when the message is copied (code block toolbars).
+    element.getAttribute('data-markdown-copy') === 'exclude'
   );
 }
 

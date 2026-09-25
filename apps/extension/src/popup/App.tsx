@@ -1,6 +1,7 @@
 import { PRODUCT_NAME } from '@skillmirror/config';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 
+import { captureStatusLabel } from '../content/captureStatus';
 import type {
   ActionResponse,
   ContentPingRequest,
@@ -134,6 +135,19 @@ export function App() {
       {page.kind === 'unsupported' && (
         <p style={{ margin: '4px 0', fontSize: 12, opacity: 0.8 }} data-testid="unsupported-note">
           SkillMirror captures only on chatgpt.com. Nothing on this page is recorded.
+        </p>
+      )}
+      {page.kind === 'supported' && page.content.capture && (
+        <Row
+          label="Capture status"
+          value={captureStatusLabel(page.content.capture, page.content.visibleMessages)}
+          testId="capture-status"
+        />
+      )}
+      {page.kind === 'supported' && page.content.capture === 'layout_unrecognized' && (
+        <p role="alert" style={{ margin: '4px 0', fontSize: 12, color: '#c33' }} data-testid="capture-degraded">
+          SkillMirror cannot read this ChatGPT page layout, so nothing from this conversation is captured. Update the
+          extension to a version that supports it.
         </p>
       )}
       <Row label="Queued events" value={status ? String(status.queued) : '…'} testId="queued-count" />

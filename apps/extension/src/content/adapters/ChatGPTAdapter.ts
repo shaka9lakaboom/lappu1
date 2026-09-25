@@ -3,10 +3,16 @@
  * chatgpt.com. It never intercepts network traffic, calls ChatGPT APIs, reads
  * tokens or cookies, or touches the page's JavaScript state.
  *
- * Two DOM shapes are recognised (fixtures in tests/fixtures/chatgpt/):
+ * Three DOM shapes are recognised (fixtures in tests/fixtures/chatgpt/):
  *  - "lightweight" shell: `li[data-message-role]` whose `id` is the message
  *    id. While generating, the assistant item has `data-message-streaming` and
  *    a temporary `pending-...` id; `data-message-complete` marks it final.
+ *  - "thread" layout (signed-in app shell, 2026-09): turns `[data-turn-key]`
+ *    hold one `[data-chatgpt-search-unit-key="...:<n>:user|assistant"]` unit
+ *    per message, ids in `data-chatgpt-search-message-ids`. User text is the
+ *    `[data-user-message-bubble]`, assistant text `[data-markdown-text-style]`.
+ *    An answer is final once ChatGPT adds `[data-chatgpt-selection-message-id]`
+ *    to it, which happens as the stream ends (the Stop button disappears).
  *  - "app" layout: `[data-message-author-role][data-message-id]`, streaming
  *    marked by `.result-streaming` or a visible stop button.
  */
@@ -15,7 +21,7 @@ import type { AttachmentMetadata } from '@skillmirror/contracts';
 import type { CapturedMessage, ProviderAdapter } from './ProviderAdapter';
 import { renderedText } from './renderedText';
 
-export const CHATGPT_ADAPTER_VERSION = 'chatgpt-1';
+export const CHATGPT_ADAPTER_VERSION = 'chatgpt-2';
 
 const SUPPORTED_HOSTS = new Set(['chatgpt.com']);
 // /c/<id> (signed in), /uc/<id> (signed out), optionally under /g/<gpt>/ or /project paths.
@@ -24,6 +30,9 @@ const MESSAGE_ID = /^[A-Za-z0-9._:-]{1,256}$/;
 const MODEL_SLUG = /^[A-Za-z0-9._:/-]{1,100}$/;
 
 const LIGHTWEIGHT_MESSAGE = 'li[data-message-role]';
+const THREAD_MESSAGE = '[data-chatgpt-search-unit-key]';
+const THREAD_ROLE = /:(user|assistant)$/;
+const THREAD_FINAL_ID = 'data-chatgpt-selection-message-id';
 const APP_MESSAGE = '[data-message-author-role]';
 const STREAMING_MARKERS = [
   'li[data-message-role="assistant"][data-message-streaming]',
@@ -31,6 +40,12 @@ const STREAMING_MARKERS = [
   '[data-testid="stop-button"]',
   'button[aria-label="Stop streaming"]',
 ].join(',');
+// The thread layout's composer has no test ids: its Stop button is known by its label only.
+// Other "Stop ..." controls (dictation, voice, read aloud) do not mean an answer is streaming.
+const STOP_LABEL = /^stop\b/i;
+const NOT_A_STREAM_STOP = /dictat|voice|record|listen|speak|aloud|read/i;
+
+type Layout = 'lightweight' | 'thread' | 'app';
 
 const ATTACHMENT_MARKERS = [
   '[data-attachment]',
@@ -70,6 +85,20 @@ export interface ChatGPTAdapterOptions {
 function clean(value: string | null | undefined, pattern: RegExp): string | null {
   const trimmed = value?.trim();
   return trimmed && pattern.test(trimmed) ? trimmed : null;
+}
+
+function layoutOf(element: Element): Layout {
+  if (element.hasAttribute('data-message-role')) return 'lightweight';
+  if (element.hasAttribute('data-chatgpt-search-unit-key')) return 'thread';
+  return 'app';
+}
+
+function roleOf(element: Element): 'user' | 'assistant' | null {
+  const role =
+    element.getAttribute('data-message-role') ??
+    THREAD_ROLE.exec(element.getAttribute('data-chatgpt-search-unit-key') ?? '')?.[1] ??
+    element.getAttribute('data-message-author-role');
+  return role === 'user' || role === 'assistant' ? role : null;
 }
 
 function guessMime(filename: string | null): string | null {
@@ -114,17 +143,29 @@ export class ChatGPTAdapter implements ProviderAdapter {
   }
 
   isAssistantStreaming(): boolean {
-    return this.doc.querySelector(STREAMING_MARKERS) !== null;
+    if (this.doc.querySelector(STREAMING_MARKERS) !== null) return true;
+    return Array.from(this.doc.querySelectorAll('button[aria-label]')).some((button) => {
+      const label = button.getAttribute('aria-label') ?? '';
+      return STOP_LABEL.test(label) && !NOT_A_STREAM_STOP.test(label);
+    });
   }
 
   /** Message elements in rendered order, excluding templates and nested duplicates. */
   messageElements(): Element[] {
+    const visible = (el: Element) => !el.closest('[hidden], template');
     const lightweight = Array.from(this.doc.querySelectorAll(LIGHTWEIGHT_MESSAGE)).filter(
-      (el) => !el.hasAttribute('data-conversation-recovery') && !el.closest('[hidden], template'),
+      (el) => !el.hasAttribute('data-conversation-recovery') && visible(el),
     );
     if (lightweight.length > 0) return lightweight;
+    const thread = Array.from(this.doc.querySelectorAll(THREAD_MESSAGE)).filter(
+      (el) =>
+        THREAD_ROLE.test(el.getAttribute('data-chatgpt-search-unit-key') ?? '') &&
+        !el.parentElement?.closest(THREAD_MESSAGE) &&
+        visible(el),
+    );
+    if (thread.length > 0) return thread;
     return Array.from(this.doc.querySelectorAll(APP_MESSAGE)).filter(
-      (el) => !el.parentElement?.closest(APP_MESSAGE) && !el.closest('[hidden], template'),
+      (el) => !el.parentElement?.closest(APP_MESSAGE) && visible(el),
     );
   }
 
@@ -169,7 +210,16 @@ export class ChatGPTAdapter implements ProviderAdapter {
       childList: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ['id', 'data-message-streaming', 'data-message-complete', 'class', 'data-message-id'],
+      attributeFilter: [
+        'id',
+        'data-message-streaming',
+        'data-message-complete',
+        'class',
+        'data-message-id',
+        THREAD_FINAL_ID,
+        'data-chatgpt-search-message-ids',
+        'aria-label', // the thread layout's Send/Stop button
+      ],
     });
     schedule();
     return () => {
@@ -186,27 +236,28 @@ export class ChatGPTAdapter implements ProviderAdapter {
     streaming: boolean,
   ): CapturedMessage | null {
     const element = all[index];
-    const lightweight = element.hasAttribute('data-message-role');
-    const role = element.getAttribute(lightweight ? 'data-message-role' : 'data-message-author-role');
-    if (role !== 'user' && role !== 'assistant') return null;
+    const layout = layoutOf(element);
+    const role = roleOf(element);
+    if (role === null) return null;
 
-    const rawId = lightweight ? element.id : element.getAttribute('data-message-id');
+    const rawId = this.rawMessageId(element, layout, role);
     const temporary = !rawId || rawId.startsWith('pending-');
     const externalMessageId = temporary ? null : clean(rawId, MESSAGE_ID);
 
-    const content = this.contentRoot(element, role, lightweight);
+    const content = this.contentRoot(element, role, layout);
     if (!content) return null;
     // User text is rendered pre-wrap by ChatGPT, so its line breaks are meaningful.
     const contentText = renderedText(content, { preformatted: role === 'user' });
     if (!contentText) return null;
 
+    const lastStreaming = streaming && this.isLastAssistant(all, index);
     const final =
       role === 'user' ||
-      (lightweight
+      (layout === 'lightweight'
         ? element.hasAttribute('data-message-complete') && !element.hasAttribute('data-message-streaming')
-        : !content.classList.contains('result-streaming') &&
-          !content.querySelector('.result-streaming') &&
-          !(streaming && this.isLastAssistant(all, index)));
+        : layout === 'thread'
+          ? element.querySelector(`[${THREAD_FINAL_ID}]`) !== null && !lastStreaming
+          : !content.classList.contains('result-streaming') && !content.querySelector('.result-streaming') && !lastStreaming);
 
     const attachmentMetadata = role === 'user' ? this.attachments(element, content) : [];
     const modelHost = element.closest('[data-message-model-slug]') ?? element.querySelector('[data-message-model-slug]');
@@ -229,9 +280,27 @@ export class ChatGPTAdapter implements ProviderAdapter {
     };
   }
 
-  private contentRoot(element: Element, role: 'user' | 'assistant', lightweight: boolean): Element | null {
-    if (lightweight) {
+  private rawMessageId(element: Element, layout: Layout, role: 'user' | 'assistant'): string | null {
+    if (layout === 'lightweight') return element.id;
+    if (layout === 'app') return element.getAttribute('data-message-id');
+    // Thread layout: an assistant unit gets its selection id when final; the unit's own id list
+    // names the message either way (its first id; the list repeats it).
+    const selection = role === 'assistant' ? element.querySelector(`[${THREAD_FINAL_ID}]`) : null;
+    return (
+      selection?.getAttribute(THREAD_FINAL_ID) ??
+      element.getAttribute('data-chatgpt-search-message-ids')?.trim().split(/\s+/)[0] ??
+      null
+    );
+  }
+
+  private contentRoot(element: Element, role: 'user' | 'assistant', layout: Layout): Element | null {
+    if (layout === 'lightweight') {
       return element.querySelector(role === 'user' ? '[data-user-message-copy]' : '[data-assistant-markdown]');
+    }
+    if (layout === 'thread') {
+      if (role === 'assistant') return element.querySelector('[data-markdown-text-style]');
+      const bubble = element.querySelector('[data-user-message-bubble]');
+      return bubble?.querySelector('.whitespace-pre-wrap') ?? bubble;
     }
     if (role === 'assistant') return element.querySelector('.markdown, [data-message-content]') ?? element;
     return element.querySelector('.whitespace-pre-wrap, [data-message-content]') ?? element;
@@ -239,8 +308,7 @@ export class ChatGPTAdapter implements ProviderAdapter {
 
   private isLastAssistant(all: Element[], index: number): boolean {
     for (let i = all.length - 1; i >= 0; i--) {
-      const role = all[i].getAttribute('data-message-author-role') ?? all[i].getAttribute('data-message-role');
-      if (role === 'assistant') return i === index;
+      if (roleOf(all[i]) === 'assistant') return i === index;
     }
     return false;
   }
