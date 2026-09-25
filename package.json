@@ -16,6 +16,11 @@
   "scripts": {
     "dev:web": "npm run dev --workspace @skillmirror/web",
     "dev:backend": "cd services/backend && python -m uvicorn app.main:app --reload --port 8000",
+    "demo": "node scripts/demo.mjs",
+    "demo:backend": "node scripts/demo.mjs backend",
+    "demo:web": "node scripts/demo.mjs web",
+    "demo:check": "node scripts/demo.mjs check",
+    "test:demo": "node --test scripts/demo.test.mjs",
     "build:web": "npm run build --workspace @skillmirror/web",
     "build:extension": "npm run build --workspace @skillmirror/extension",
     "build": "npm run build:web && npm run build:extension",

@@ -17,6 +17,9 @@ SkillStatus = Literal["ACTIVE", "CANDIDATE", "DEPRECATED", "MERGED"]
 SkillSource = Literal["COURSE_BOOTSTRAP", "CANDIDATE_APPROVAL", "MANUAL", "SEED"]
 SkillEdgeType = Literal["PARENT", "PREREQUISITE", "RELATED"]
 AssessmentType = Literal["mcq", "numeric", "code", "sql", "short_response", "reasoning"]
+# Why a bootstrap that is not READY waits (derived from its job, never from error text):
+# provider 429/503, the daily request budget reserve, or backoff after a failed attempt.
+BootstrapWaitReason = Literal["MODEL_BACKPRESSURE", "MODEL_BUDGET_RESERVE", "RETRY_AFTER_ERROR"]
 
 
 class CourseCreateRequest(BaseModel):
@@ -37,12 +40,19 @@ class Course(BaseModel):
     status: CourseStatus
     graph_status: CourseGraphStatus
     graph_version: int
+    # A fixed owner-facing summary of the last bootstrap error; the stored exception text
+    # (provider payloads, driver messages) is never returned.
     graph_error: str | None
     graph_generated_at: datetime | None
     role: CourseMemberRole
     is_owner: bool
     skill_count: int = Field(ge=0)
     bootstrap_job_state: str | None
+    # While the bootstrap job is queued or waits for an automatic retry: why it waits (None =
+    # simply queued) and when the next attempt is due (its available_at; in the past = due,
+    # but no worker has claimed it yet).
+    bootstrap_wait_reason: BootstrapWaitReason | None
+    bootstrap_next_attempt_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

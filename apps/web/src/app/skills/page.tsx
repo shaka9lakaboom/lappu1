@@ -5,6 +5,7 @@ import type { ReactNode } from 'react';
 
 import { selectCourse } from '@/app/courses/actions';
 import { AutoRefresh } from '@/components/auto-refresh';
+import { GraphWaitNotice } from '@/components/graph-wait-notice';
 import { AppHeader } from '@/components/experience/app-header';
 import { DebtBadge, MasteryBadge } from '@/components/experience/badges';
 import { CourseSelector } from '@/components/experience/course-selector';
@@ -52,6 +53,7 @@ export default async function SkillMapPage({ searchParams }: PageProps<'/skills'
         {isGraphInProgress(course.graph_status) ? (
           <>
             <AutoRefresh />
+            <GraphWaitNotice course={course} />
             The skill map appears here as soon as it is ready. This page updates automatically.
           </>
         ) : (

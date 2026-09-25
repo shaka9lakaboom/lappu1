@@ -15,21 +15,59 @@ export function isGraphInProgress(status: CourseGraphStatus): boolean {
   return IN_PROGRESS.has(status);
 }
 
+type BootstrapView = Pick<Course, 'graph_status' | 'bootstrap_job_state'> &
+  Partial<Pick<Course, 'bootstrap_wait_reason' | 'bootstrap_next_attempt_at' | 'graph_error'>>;
+
 /** Bootstrap status in plain words. */
-export function graphStatusLabel(course: Pick<Course, 'graph_status' | 'bootstrap_job_state'>): string {
-  const retrying = course.bootstrap_job_state === 'RETRY_WAIT';
-  switch (course.graph_status) {
-    case 'PENDING':
-      return retrying ? 'Retrying skill graph generation' : 'Queued for skill graph generation';
-    case 'GENERATING':
-      return retrying ? 'Retrying skill graph generation' : 'Generating skill graph';
-    case 'EMBEDDING':
-      return retrying ? 'Retrying skill indexing' : 'Indexing skills for retrieval';
-    case 'READY':
-      return 'Skill graph ready';
-    case 'FAILED':
-      return 'Skill graph generation failed';
+export function graphStatusLabel(course: BootstrapView): string {
+  const status = course.graph_status;
+  if (status === 'READY') return 'Skill graph ready';
+  if (status === 'FAILED') return 'Skill graph generation failed';
+  const indexing = status === 'EMBEDDING';
+  if (course.bootstrap_job_state === 'PROCESSING') {
+    return indexing ? 'Indexing skills for retrieval' : 'Generating skill graph';
   }
+  if (course.bootstrap_wait_reason === 'MODEL_BACKPRESSURE' || course.bootstrap_wait_reason === 'MODEL_BUDGET_RESERVE') {
+    return indexing ? 'Waiting to retry skill indexing' : 'Waiting to retry skill graph generation';
+  }
+  if (course.bootstrap_job_state === 'RETRY_WAIT') {
+    return indexing ? 'Retrying skill indexing' : 'Retrying skill graph generation';
+  }
+  if (indexing) return 'Indexing skills for retrieval';
+  return status === 'PENDING' ? 'Queued for skill graph generation' : 'Generating skill graph';
+}
+
+/** A job due for longer than this without being claimed means no worker is polling the queue. */
+export const WORKER_OVERDUE_MS = 60_000;
+
+export interface GraphWait {
+  /** What the bootstrap waits for; null when it is simply queued. */
+  message: string | null;
+  /** When the next automatic attempt is due (ISO). */
+  nextAttemptAt: string;
+  /** Due for over a minute and still not claimed: the backend worker does not seem to run. */
+  overdue: boolean;
+}
+
+/** Why an in-progress bootstrap is not running right now, from the API's job summary. */
+export function graphWait(course: BootstrapView, now: Date = new Date()): GraphWait | null {
+  const nextAttemptAt = course.bootstrap_next_attempt_at;
+  if (!nextAttemptAt || !isGraphInProgress(course.graph_status)) return null;
+  const subject = course.graph_status === 'EMBEDDING' ? 'Skill indexing' : 'Skill graph generation';
+  let message: string | null = null;
+  switch (course.bootstrap_wait_reason) {
+    case 'MODEL_BACKPRESSURE':
+      message = `${subject} is temporarily waiting for the AI provider.`;
+      break;
+    case 'MODEL_BUDGET_RESERVE':
+      message = `${subject} is waiting for the AI request budget: today's free-tier allowance for this model is used up.`;
+      break;
+    case 'RETRY_AFTER_ERROR':
+      message = `The last attempt did not succeed.${course.graph_error ? ` ${course.graph_error}` : ''}`;
+      break;
+  }
+  const overdue = now.getTime() - Date.parse(nextAttemptAt) > WORKER_OVERDUE_MS;
+  return { message, nextAttemptAt, overdue };
 }
 
 export function importanceLabel(importance: number): string {
