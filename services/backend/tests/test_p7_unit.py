@@ -183,3 +183,42 @@ def test_a_malformed_or_foreign_token_is_refused_everywhere(verifier, make_token
                 headers={"Authorization": f"Bearer {token}", "Idempotency-Key": "k"},
             )
             assert response.status_code == 401, (method, path)
+
+
+def test_model_run_errors_are_redacted_before_they_are_written() -> None:
+    """P8 H14: a provider error echoing a key or an e-mail never reaches model_runs."""
+    from contextlib import contextmanager
+    from uuid import uuid4
+
+    from app.model_gateway.recorder import DbModelRunRecorder
+    from app.model_gateway.types import ModelRun, ModelRunStatus
+
+    executed: list[tuple] = []
+
+    class Conn:
+        def execute(self, sql, params=None):
+            executed.append(params)
+
+    class Pool:
+        @contextmanager
+        def connection(self):
+            yield Conn()
+
+    key = "AIza" + "S" * 35
+    run = ModelRun(
+        id=uuid4(),
+        trace_id="t",
+        task_type="TURN_ANALYSIS",
+        provider="google",
+        model="gemini-3.5-flash-lite",
+        prompt_version="turn-analysis/v1",
+        input_hash="0" * 64,
+        status=ModelRunStatus.FAILED,
+        latency_ms=5,
+        error_code="HTTP_400",
+        error_message=f"400 for https://x.test/v1?key={key} (owner learner@example.edu)",
+    )
+    DbModelRunRecorder(Pool()).record(run)  # type: ignore[arg-type]
+    stored = [p for p in executed[0] if isinstance(p, str) and "400 for" in p][0]
+    assert key not in stored and "learner@example.edu" not in stored
+    assert "[redacted" in stored
