@@ -25,6 +25,10 @@ code; no model run), then drives the HTTP API as learner A and checks:
     4 every state explained       9 recommendations update deterministically
     5 evidence traces to activity 10 no model request
 
+Run it on a disposable LOCAL database: its fixture creates prefixed registry rows, so run
+`supabase db reset` afterwards (the DB tests expect a clean registry). On hosted, use
+acceptance_p5_hosted.py, which reuses an existing course graph and creates no registry row.
+
 Learner B stays seeded for the browser walkthrough (apps/web/e2e/p5-acceptance.spec.ts);
 its credentials go to --ui-credentials (a git-ignored file), never to stdout. The evidence
 file holds ids and results only - no token or password.
@@ -106,6 +110,65 @@ def provenance(pool, learner: str) -> dict[str, int]:
     }
 
 
+TOPIC_KINDS = {"DOMAIN", "SUBJECT", "TOPIC"}
+ROLE_KEYS = ("for_loops", "while_loops", "comprehensions", "variables", "indexing")
+
+
+def topic_groups(graph: dict) -> tuple[int, int]:
+    """(topic groups, assessable skills) as the Skill Map renders them (lib/courses.ts)."""
+    topics = {s["skill"]["id"] for s in graph["skills"] if s["skill"]["node_kind"] in TOPIC_KINDS}
+    skills = [
+        s["skill"]["id"] for s in graph["skills"] if s["skill"]["node_kind"] not in TOPIC_KINDS
+    ]
+    topic_of: dict[str, str] = {}
+    for edge in graph["edges"]:
+        if edge["edge_type"] == "PARENT" and edge["from_skill_id"] in topics:
+            topic_of.setdefault(edge["to_skill_id"], edge["from_skill_id"])
+    groups = {topic_of[s] for s in skills if s in topic_of}
+    return len(groups) + (1 if any(s not in topic_of for s in skills) else 0), len(skills)
+
+
+def ui_expectations(api: Http, course_id: str, skills: dict[str, str]) -> dict:
+    """What the browser walkthrough must see for this learner, read from the API."""
+    ledger = api.get(f"/v1/ledger?course_id={course_id}")["skills"]
+    counts = dict.fromkeys(("UNKNOWN", "EMERGING", "DEVELOPING", "DEMONSTRATED", "VERIFIED"), 0)
+    for entry in ledger:
+        counts[entry["mastery_state"]] = counts.get(entry["mastery_state"], 0) + 1
+    topics, rows = topic_groups(api.get(f"/v1/courses/{course_id}/skills"))
+    debt = api.get(f"/v1/skills/{skills['comprehensions']}")["debt"]
+    recs = api.get(f"/v1/recommendations?course_id={course_id}&limit=4")["recommendations"]
+    names = {e["skill_id"]: e["canonical_name"] for e in ledger}
+    band_word = {"LOW": "Low", "MODERATE": "Moderate", "HIGH": "High"}.get(debt["band"], "No")
+    return {
+        "counts": counts,
+        # After the walkthrough's DONT_COUNT the demonstrated skill is DEVELOPING.
+        "counts_after": {
+            "DEMONSTRATED": counts["DEMONSTRATED"] - 1,
+            "DEVELOPING": counts["DEVELOPING"] + 1,
+        },
+        "names": {k: names[v] for k, v in skills.items() if k in ROLE_KEYS},
+        "topics": topics,
+        "skill_rows": rows,
+        "debt_band": debt["band"],
+        "debt_label": f"{band_word} reliance signal",
+        "recommendations": len(recs),
+        "recommendations_after": min(4, len(recs) + 1),
+        "practice_after": sum(r["type"] == "PRACTICE" for r in recs) + 1,
+    }
+
+
+def write_ui_files(credentials: Path, email: str, password: str, expectations: dict) -> None:
+    """Credentials + expectations for the walkthrough, in git-ignored files (never printed)."""
+    credentials.parent.mkdir(parents=True, exist_ok=True)
+    expect_path = credentials.with_suffix(".expect.json")
+    expect_path.write_text(json.dumps(expectations, indent=2), encoding="utf-8")
+    credentials.write_text(
+        f"P5_ACCEPTANCE_EMAIL={email}\nP5_ACCEPTANCE_PASSWORD={password}\n"
+        f"P5_ACCEPTANCE_EXPECT={expect_path.resolve().as_posix()}\n",
+        encoding="utf-8",
+    )
+
+
 def check(results: list, number: int, name: str, ok: bool, detail: object) -> None:
     results.append({"check": number, "name": name, "passed": bool(ok), "detail": detail})
     print(f"[{'PASS' if ok else 'FAIL'}] {number:>2} {name}: {detail}")
@@ -127,7 +190,7 @@ def main() -> int:
     health = Http(args.api).get("/health")
 
     learner, token, _, _ = sign_up(supabase, "api")
-    ui_learner, _, ui_email, ui_password = sign_up(supabase, "ui")
+    ui_learner, ui_token, ui_email, ui_password = sign_up(supabase, "ui")
     tag = uuid.uuid4().hex[:6]
     seed = seed_p5_learner(pool, uuid.UUID(learner), f"P5acc{tag} ")
     ui_seed = seed_p5_learner(pool, uuid.UUID(ui_learner), f"P5ui{tag} ")
@@ -349,11 +412,9 @@ def main() -> int:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
     if args.ui_credentials:
-        args.ui_credentials.parent.mkdir(parents=True, exist_ok=True)
-        args.ui_credentials.write_text(
-            f"P5_ACCEPTANCE_EMAIL={ui_email}\nP5_ACCEPTANCE_PASSWORD={ui_password}\n",
-            encoding="utf-8",
-        )
+        ui_skills = {k: str(v) for k, v in ui_seed.skills.items()}
+        expectations = ui_expectations(Http(args.api, ui_token), str(ui_seed.course_id), ui_skills)
+        write_ui_files(args.ui_credentials, ui_email, ui_password, expectations)
     pool.close()
     print("P5 ACCEPTANCE:", "PASS" if passed else "FAIL")
     return 0 if passed else 1

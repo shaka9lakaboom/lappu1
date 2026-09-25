@@ -408,12 +408,73 @@ def _application(code: str, outcome: str) -> dict:
 def seed_p5_learner(
     pool: ConnectionPool, learner_id: UUID, prefix: str, *, now: datetime | None = None
 ) -> P5Seed:
-    """Seed the learner described in the module docstring and derive its ledger and queue."""
+    """Seed the learner described in the module docstring on a new course and skill graph."""
+    with pool.connection() as conn, conn.transaction():
+        course_id, skills = seed_graph(conn, learner_id, prefix)
+    return seed_evidence(pool, learner_id, course_id, skills, now=now)
+
+
+ROLES = ("for_loops", "while_loops", "comprehensions", "variables", "indexing")
+
+
+def seed_p5_learner_on_course(
+    pool: ConnectionPool,
+    learner_id: UUID,
+    course_id: UUID,
+    roles: dict[str, UUID],
+    *,
+    now: datetime | None = None,
+) -> P5Seed:
+    """The same evidence on an EXISTING course graph, creating no registry row.
+
+    The learner joins the course as a STUDENT (a learner-owned membership) and every other row
+    is the learner's own, so deleting the learner removes all of it. Each role must be an ACTIVE
+    assessable skill of the course, and `variables` must be a PREREQUISITE of `indexing`.
+    """
+    if set(roles) != set(ROLES):
+        raise ValueError(f"roles must be exactly {ROLES}")
+    with pool.connection() as conn, conn.transaction():
+        found = {
+            r[0]
+            for r in conn.execute(
+                """
+                select cs.skill_id from public.course_skills cs
+                  join public.skill_nodes n on n.id = cs.skill_id
+                 where cs.course_id = %s and cs.active and n.status = 'ACTIVE'
+                   and n.node_kind in ('SKILL', 'SUBSKILL') and cs.skill_id = any(%s)
+                """,
+                (course_id, list(roles.values())),
+            ).fetchall()
+        }
+        missing = [k for k, v in roles.items() if v not in found]
+        if missing:
+            raise ValueError(f"not active assessable skills of course {course_id}: {missing}")
+        if not conn.execute(
+            "select 1 from public.skill_edges where edge_type = 'PREREQUISITE' "
+            "and from_skill_id = %s and to_skill_id = %s",
+            (roles["variables"], roles["indexing"]),
+        ).fetchone():
+            raise ValueError("`variables` must be a PREREQUISITE of `indexing` in the graph")
+        conn.execute(
+            "insert into public.course_memberships (course_id, user_id, role) "
+            "values (%s, %s, 'STUDENT') on conflict do nothing",
+            (course_id, learner_id),
+        )
+    return seed_evidence(pool, learner_id, course_id, dict(roles), now=now)
+
+
+def seed_evidence(
+    pool: ConnectionPool,
+    learner_id: UUID,
+    course_id: UUID,
+    skills: dict[str, UUID],
+    *,
+    now: datetime | None = None,
+) -> P5Seed:
+    """The deterministic turns, ledger, queue and one seeded exclusion for the role skills."""
     now = now or datetime.now(UTC)
     with pool.connection() as conn:
         policy = load_policy(conn)
-        with conn.transaction():
-            course_id, skills = seed_graph(conn, learner_id, prefix)
         seed = P5Seed(learner_id, course_id, skills)
         plan: list[tuple[str, dict]] = [
             ("for_loops", _application("for name in names: print(name)", "CORRECT")),

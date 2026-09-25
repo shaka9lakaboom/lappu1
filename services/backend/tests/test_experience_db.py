@@ -738,3 +738,98 @@ def test_the_evidence_pipeline_refreshes_the_queue_after_the_ledger(db_pool, reg
     # Every course skill has its current action; one piece of evidence is not a judgement.
     assert len(rows) == 30
     assert set(rows) == {("NO_ACTION", "NOT_ENOUGH_EVIDENCE", "UNKNOWN")}
+
+
+def learner_rows(pool, table: str, learner) -> int:
+    sql = f"select count(*) from public.{table} where learner_id = %s"  # noqa: S608 - fixed names
+    return fetch(pool, sql, learner)[0][0]
+
+
+LEARNER_TABLES = (
+    "conversations",
+    "raw_messages",
+    "processing_jobs",
+    "activity_segments",
+    "mapping_decisions",
+    "skill_mappings",
+    "attributions",
+    "evidence_events",
+    "skill_ledger",
+    "recommendations",
+)
+
+
+def test_the_fixture_reuses_an_existing_course_graph_and_cascades_away(
+    db_pool, registry, new_learner
+):
+    """The hosted acceptance path: existing canonical skills, learner-owned rows only."""
+    from tests.p5_fixtures import ROLES, seed_graph, seed_p5_learner_on_course
+
+    owner, learner = new_learner(), new_learner()
+    with db_pool.connection() as conn, conn.transaction():
+        course_id, skills = seed_graph(conn, owner, registry)
+    registry_rows = fetch(
+        db_pool,
+        "select (select count(*) from public.skill_nodes), (select count(*) from public.skill_edges), "
+        "(select count(*) from public.course_skills where course_id = %s)",
+        course_id,
+    )
+    seed = seed_p5_learner_on_course(db_pool, learner, course_id, {k: skills[k] for k in ROLES})
+    assert (
+        fetch(
+            db_pool,
+            "select (select count(*) from public.skill_nodes), (select count(*) from public.skill_edges), "
+            "(select count(*) from public.course_skills where course_id = %s)",
+            course_id,
+        )
+        == registry_rows
+    )  # no registry or course-overlay row created
+    states = dict(
+        fetch(
+            db_pool,
+            "select skill_id, mastery_state::text from public.skill_ledger where learner_id = %s",
+            learner,
+        )
+    )
+    assert states == {
+        skills["for_loops"]: "DEMONSTRATED",
+        skills["comprehensions"]: "UNKNOWN",
+        skills["variables"]: "EMERGING",
+        skills["indexing"]: "DEVELOPING",
+    }
+    assert seed.excluded_evidence_id is not None
+    assert (
+        fetch(db_pool, "select count(*) from public.evidence_events where learner_id = %s", owner)[
+            0
+        ][0]
+        == 0
+    )  # the course owner's data is untouched
+
+    # Deleting the learner (the Auth cascade) removes every learner-owned row, nothing else.
+    with db_pool.connection() as conn:
+        conn.execute("delete from auth.users where id = %s", (learner,))
+    assert {t: learner_rows(db_pool, t, learner) for t in LEARNER_TABLES} == dict.fromkeys(
+        LEARNER_TABLES, 0
+    )
+    assert (
+        fetch(db_pool, "select count(*) from public.feedback where user_id = %s", learner)[0][0]
+        == 0
+    )
+    assert fetch(
+        db_pool, "select user_id from public.course_memberships where course_id = %s", course_id
+    ) == [(owner,)]
+    assert (
+        fetch(
+            db_pool,
+            "select (select count(*) from public.skill_nodes), (select count(*) from public.skill_edges), "
+            "(select count(*) from public.course_skills where course_id = %s)",
+            course_id,
+        )
+        == registry_rows
+    )
+    with pytest.raises(ValueError, match="PREREQUISITE"):
+        swapped = {k: skills[k] for k in ROLES} | {
+            "variables": skills["indexing"],
+            "indexing": skills["variables"],
+        }
+        seed_p5_learner_on_course(db_pool, new_learner(), course_id, swapped)
