@@ -2,7 +2,7 @@
 
 Recomputed from ALL non-excluded, performance-bearing EvidenceEvents of a skill:
 
-    age_days           = as_of - occurred_at
+    age_days           = whole UTC days from occurred_at to as_of
     recency_multiplier = exp(-ln(2) * age_days / recency_half_life_days)
     w_i                = strength_i * recency_multiplier_i
     alpha              = prior_alpha + sum(w_i * outcome_i)
@@ -32,7 +32,7 @@ VERIFICATION evidence row cannot verify), nothing writes such evidence, and migr
 import math
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -94,8 +94,12 @@ class MasteryResult:
     previously_verified: bool
 
 
-def age_days(as_of: datetime, occurred_at: datetime) -> float:
-    return max((as_of - occurred_at).total_seconds() / 86400.0, 0.0)
+def age_days(as_of: datetime, occurred_at: datetime) -> int:
+    """Whole UTC calendar days from the activity to `as_of` (never negative).
+
+    Day granularity keeps the ledger constant within a day: a replay or a second
+    recomputation on the same day re-derives exactly the same row."""
+    return max((as_of.astimezone(UTC).date() - occurred_at.astimezone(UTC).date()).days, 0)
 
 
 def recency_multiplier(age: float, half_life_days: float) -> float:

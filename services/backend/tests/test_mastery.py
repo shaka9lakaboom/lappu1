@@ -234,3 +234,12 @@ def test_perfect_transfer_evidence_is_at_most_demonstrated() -> None:
     m = compute_mastery(records, MASTERY, NOW)
     assert m.mastery_mean > 0.95 and m.support > 40
     assert m.state == "DEMONSTRATED" and not m.recently_verified and not m.previously_verified
+
+
+def test_recomputation_within_a_day_is_identical_and_decays_across_days() -> None:
+    records = [record(strength=1.0, days=d) for d in (0, 3, 40)]
+    morning = compute_mastery(records, MASTERY, NOW.replace(hour=0, minute=1))
+    evening = compute_mastery(records, MASTERY, NOW.replace(hour=23, minute=59))
+    assert morning == evening  # a same-day replay re-derives exactly the same ledger
+    tomorrow = compute_mastery(records, MASTERY, NOW + timedelta(days=1))
+    assert tomorrow.support < morning.support
