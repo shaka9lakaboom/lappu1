@@ -53,6 +53,68 @@ ARCHITECTURE_POLICY: dict[str, Any] = {
         "hard_max_skills": 80,
         "default_importance": 0.5,
     },
+    # Migration 0005 (P3B) and 0006 (P4) seeds, ADR 0005.
+    "attribution": {"min_confidence": 0.80, "copy_guard_min_chars": 24},
+    "evidence": {
+        "base_weights": {
+            "EXPOSURE": 0.0,
+            "OBSERVATION": 0.0,
+            "ASSISTED_ATTEMPT": 0.35,
+            "INDEPENDENT_EXPLANATION": 0.75,
+            "INDEPENDENT_APPLICATION": 1.0,
+            "TRANSFER": 1.25,
+            "VERIFICATION": 1.5,
+            "EXECUTION_RESULT": 1.25,
+            "TEACHER_EVIDENCE": 1.0,
+        },
+        "independence": {
+            "EXPOSURE": 0.0,
+            "OBSERVATION": 0.0,
+            "ASSISTED_ATTEMPT": 0.3,
+            "INDEPENDENT_EXPLANATION": 0.8,
+            "INDEPENDENT_APPLICATION": 1.0,
+            "TRANSFER": 1.0,
+            "VERIFICATION": 1.0,
+            "EXECUTION_RESULT": 1.0,
+            "TEACHER_EVIDENCE": 1.0,
+        },
+        "outcome_values": {"CORRECT": 1.0, "PARTIAL": 0.5, "INCORRECT": 0.0},
+        "difficulty": {"default": 0.5, "multiplier_base": 0.75, "multiplier_slope": 0.5},
+    },
+    "mastery": {
+        "prior_alpha": 1.0,
+        "prior_beta": 1.0,
+        "recency_half_life_days": 180,
+        "unknown_min_support": 1.0,
+        "emerging_below_mean": 0.45,
+        "demonstrated_min_mean": 0.70,
+        "demonstrated_min_support": 3.0,
+        "application_types": [
+            "INDEPENDENT_APPLICATION",
+            "TRANSFER",
+            "EXECUTION_RESULT",
+            "VERIFICATION",
+        ],
+        "application_min_outcome": 1.0,
+        "verified_min_mean": 0.80,
+        "verified_min_support": 4.0,
+        "verification_max_age_days": 180,
+    },
+    "debt": {
+        "min_recent_delegations": 2,
+        "recent_window_days": 30,
+        "delegation_half_life_days": 14,
+        "tau": 2.0,
+        "actor_weights": {"AI": 1.0, "SHARED": 0.5},
+        "delegation_evidence_types": ["OBSERVATION", "ASSISTED_ATTEMPT"],
+        "min_evidence_confidence": 0.80,
+        "learning_relevance_levels": ["high", "medium"],
+        "trivial_reason_codes": ["TRIVIAL_UTILITY", "FACTUAL_LOOKUP"],
+        "evidence_gap_support_target": 3.0,
+        "verification_factor": {"recently_passed": 0.2, "unverified": 0.6, "failed_or_due": 1.0},
+        "verification_recent_days": 30,
+        "actionable_min_score": 15,
+    },
 }
 
 
@@ -159,6 +221,7 @@ MARKERS = {
     "adjudication": "second-pass adjudicator",
     "turn": "You are the turn analyst",
     "turn_adjudication": "You are the turn adjudicator",
+    "attribution": "You are the contribution attributor",
 }
 
 
@@ -273,3 +336,41 @@ def graph_proposal(names: list[str], *, topics: int = 4, prefix: str = "") -> di
             }
         )
     return {"topics": topic_list, "skills": skills}
+
+
+def attribution(
+    skill_id: str,
+    actor: str = "STUDENT",
+    *,
+    confidence: float = 0.9,
+    evidence_type: str = "INDEPENDENT_APPLICATION",
+    outcome: str = "CORRECT",
+    student_span: str | None = None,
+    ai_span: str | None = None,
+    reason_code: str = "STUDENT_WROTE_CODE",
+) -> dict[str, Any]:
+    """One SKILL_ATTRIBUTION item (Appendix A.3 + outcome signal)."""
+    return {
+        "skill_id": skill_id,
+        "actor": actor,
+        "confidence": confidence,
+        "student_evidence_span": student_span,
+        "ai_evidence_span": ai_span,
+        "evidence_type": evidence_type,
+        "outcome_signal": outcome,
+        "reason_code": reason_code,
+    }
+
+
+def skill_ids_in(messages: list[Message]) -> list[str]:
+    """The accepted skill ids an attribution request listed (also inside a repair call)."""
+    return re.findall(r"id=([0-9a-f-]{36})", messages[0].content)
+
+
+def attribute_all(**fields: Any) -> Callable[[list[Message]], dict[str, Any]]:
+    """SKILL_ATTRIBUTION answer: the same attribution for every accepted skill listed."""
+
+    def respond(messages: list[Message]) -> dict[str, Any]:
+        return {"attributions": [attribution(i, **fields) for i in skill_ids_in(messages)]}
+
+    return respond

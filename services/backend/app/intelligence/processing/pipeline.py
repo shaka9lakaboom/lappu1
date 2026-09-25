@@ -1,13 +1,19 @@
-"""PROCESS_RAW_MESSAGE job, P3A scope (architecture §9.1-§9.4).
+"""PROCESS_RAW_MESSAGE job (architecture §9, §10; ADR 0003, 0004, 0005).
 
-    claim -> pair/prepare turn -> analyse (qualify, route, retrieve, rerank,
-          map/abstain; see processing/analysis.py) -> persist analysis -> complete
+    claim -> pair/prepare turn
+          -> P3A: analyse (qualify, route, retrieve, rerank, map/abstain; see
+             processing/analysis.py) -> persist analysis (one transaction)
+          -> P3B: per MAPPED segment, attribution -> evidence qualification
+             -> attributions + evidence (one transaction per segment)
+          -> P4: deterministic ledger recompute (mastery + AI Assistance Debt)
+          -> complete
 
 The analysis mode is "combined" by default (local retrieval, then one
 TURN_ANALYSIS call and at most one adjudication call; ADR 0004) or "staged".
-Model calls run outside any database transaction; the analysis is written in
-one transaction at the end. The pipeline stops after mapping/abstention:
-attribution and EvidenceEvents are P3B.
+A mapped segment adds exactly one SKILL_ATTRIBUTION call; evidence strength,
+mastery and debt make none. Model calls run outside any database transaction.
+A job that already has its P3A analysis resumes at the pending attribution, so
+a deferral (429/503, budget) never repeats the P3A calls.
 """
 
 from dataclasses import dataclass
@@ -16,6 +22,7 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
+from app.intelligence.evidence.stage import run_evidence_stage
 from app.intelligence.policy import load_policy
 from app.intelligence.processing.analysis import AnalysisMode, analyze_unit
 from app.intelligence.processing.persist import (
@@ -101,14 +108,17 @@ def process_raw_message_job(
     job: ClaimedJob,
     *,
     mode: AnalysisMode = "combined",
+    evidence: bool = True,
 ) -> JobResult:
+    """`evidence=False` runs the P3A stage alone (used by the P3A tests)."""
     with pool.connection() as conn:
         policy = load_policy(conn)
         decision = build_unit(conn, job.entity_id, policy.processing_unit)
         if decision.unit is None:
             return JobResult(decision.outcome or "SKIPPED", decision.defer_seconds)
         unit = decision.unit
-        if already_analyzed(conn, unit.anchor.id, ANALYSIS_VERSION):
+        analyzed = already_analyzed(conn, unit.anchor.id, ANALYSIS_VERSION)
+        if analyzed and not evidence:
             return JobResult("ALREADY_ANALYZED")
         courses = resolve_courses(conn, unit.learner_id, unit.active_course_id)
 
@@ -125,21 +135,36 @@ def process_raw_message_job(
         policy.processing_unit.unit_max_chars,
         policy.processing_unit.recent_context_max_chars,
     )
-    result = analyze_unit(
-        pool, gateway, text, course_ids=course_ids, policy=policy, context=context, mode=mode
-    )
-
-    with pool.connection() as conn:
-        written = persist_analysis(
-            conn,
-            unit=unit,
-            analyses=result.analyses,
-            course_ids=course_ids,
-            qualification_run_id=result.qualification_run_id,
-            qualification_prompt_version=result.qualification_prompt_version,
-            policy_snapshot=policy.snapshot(),
-            processing_job_id=job.id,
+    outcome = "ALREADY_ANALYZED"
+    if not analyzed:
+        result = analyze_unit(
+            pool, gateway, text, course_ids=course_ids, policy=policy, context=context, mode=mode
         )
-    if not written:
-        return JobResult("ALREADY_ANALYZED")
-    return JobResult(overall_outcome(result.analyses))
+        with pool.connection() as conn:
+            written = persist_analysis(
+                conn,
+                unit=unit,
+                analyses=result.analyses,
+                course_ids=course_ids,
+                qualification_run_id=result.qualification_run_id,
+                qualification_prompt_version=result.qualification_prompt_version,
+                policy_snapshot=policy.snapshot(),
+                processing_job_id=job.id,
+            )
+        if written:
+            outcome = overall_outcome(result.analyses)
+    if not evidence:
+        return JobResult(outcome)
+
+    stage = run_evidence_stage(
+        pool,
+        gateway,
+        unit=unit,
+        text=text,
+        policy=policy,
+        context=context,
+        processing_job_id=job.id,
+    )
+    if outcome == "ALREADY_ANALYZED" and not stage.attributed_segments:
+        return JobResult(outcome)  # a replay: nothing new (the ledger was re-derived)
+    return JobResult(stage.outcome or outcome)

@@ -6,10 +6,11 @@ def test_application_module_imports() -> None:
     assert module.app.title == "SkillMirror API"
 
 
-def test_only_p1_and_p2_routes_are_published(client) -> None:
+def test_only_the_published_phase_routes_exist(client) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
-    # P1 ingestion + P2 courses. P3A adds no endpoint; evidence/ledger APIs are later phases.
+    # P1 ingestion + P2 courses + P4 ledger. Skill detail, activity, verification and feedback
+    # endpoints belong to later phases.
     assert set(response.json()["paths"]) == {
         "/health",
         "/v1/events/batch",
@@ -17,4 +18,5 @@ def test_only_p1_and_p2_routes_are_published(client) -> None:
         "/v1/courses",
         "/v1/courses/{course_id}",
         "/v1/courses/{course_id}/skills",
+        "/v1/ledger",
     }

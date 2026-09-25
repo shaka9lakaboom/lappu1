@@ -203,9 +203,11 @@ def build_worker(
     gateway: ModelGateway,
     *,
     turn_analysis_mode: str = "combined",
+    evidence: bool = True,
     **kwargs: object,
 ) -> Worker:
-    """The production worker: P2 course bootstrap + P3A raw-message processing."""
+    """The production worker: P2 course bootstrap + raw-message processing (P3A mapping,
+    P3B attribution/evidence, P4 ledger). `evidence=False` stops after P3A (tests)."""
     from app.intelligence.processing.pipeline import process_raw_message_job
     from app.intelligence.skill_graph.jobs import mark_bootstrap_failed, run_bootstrap_job
 
@@ -214,7 +216,7 @@ def build_worker(
         {
             JOB_BOOTSTRAP_COURSE_GRAPH: partial(run_bootstrap_job, pool, gateway),
             JOB_PROCESS_RAW_MESSAGE: partial(
-                process_raw_message_job, pool, gateway, mode=turn_analysis_mode
+                process_raw_message_job, pool, gateway, mode=turn_analysis_mode, evidence=evidence
             ),
         },
         failure_hooks={
@@ -266,6 +268,13 @@ def main() -> None:  # pragma: no cover - thin CLI
         raise SystemExit(f"worker not started: {exc}") from exc
     if gateway is None:
         raise SystemExit("GEMINI_API_KEY is not set: the worker needs the model gateway")
+    from app.intelligence.policy import PolicyConfigError, verify_policy
+
+    try:
+        verify_policy(pool)
+    except PolicyConfigError as exc:
+        pool.close()
+        raise SystemExit(f"worker not started: {exc}") from exc
     log_model_policy(gateway, settings.turn_analysis_mode)
     worker = build_worker(
         pool,
