@@ -1,8 +1,8 @@
 /**
- * Intelligence contracts: qualification, retrieval, mapping (P3A), attribution + evidence (P3B)
- * and the ledger (P4) (architecture §9, §10, Appendix A).
+ * Intelligence contracts: qualification, retrieval, mapping (P3A), attribution + evidence (P3B),
+ * the ledger (P4) and the P5 feedback / recommendation enums (architecture §9, §10, Appendix A).
  *
- * Mirrors services/backend/app/intelligence/contracts.py and migrations 0003, 0005, 0006.
+ * Mirrors services/backend/app/intelligence/contracts.py and migrations 0003, 0005, 0006, 0007.
  * services/backend/tests/test_contract_parity.py checks the enum lists.
  */
 
@@ -137,14 +137,19 @@ export interface AttributionOutput {
   attributions: AttributionItem[];
 }
 
-/** One immutable EvidenceEvent (§10.1). */
+/** One immutable EvidenceEvent (§10.1) with its provenance, as the learner may inspect it (P5). */
 export interface EvidenceEvent {
   id: string;
   learner_id: string;
   skill_id: string;
   source_type: EvidenceSourceType;
   source_id: string;
+  /** Captured-activity provenance (AI_ACTIVITY); null for verification / teacher evidence. */
   attribution_id: string | null;
+  mapping_id: string | null;
+  decision_id: string | null;
+  segment_id: string | null;
+  raw_message_ids: string[];
   evidence_type: EvidenceType;
   actor: EvidenceActor;
   outcome_signal: OutcomeSignal;
@@ -162,7 +167,11 @@ export interface EvidenceEvent {
   evidence_confidence: number;
   evidence_span: Record<string, string | null>;
   model_run_ids: string[];
+  qualification_reason: string;
+  /** One-way exclusion (a learner correction); the row and its provenance stay. */
   excluded: boolean;
+  exclusion_reason: string | null;
+  excluded_at: string | null;
   occurred_at: string;
   created_at: string;
 }
@@ -179,6 +188,28 @@ export const MASTERY_STATES = [
   'NEEDS_REVERIFICATION',
 ] as const;
 export type MasteryState = (typeof MASTERY_STATES)[number];
+
+// --- P5: student experience (feedback + recommendations; migration 0007) ------------------
+
+export const FEEDBACK_ACTIONS = ['WRONG_SKILL', 'DONT_COUNT', 'EVALUATION'] as const;
+export type FeedbackAction = (typeof FEEDBACK_ACTIONS)[number];
+
+export const FEEDBACK_TARGET_TYPES = ['EVIDENCE_EVENT', 'SKILL_MAPPING', 'ACTIVITY_SEGMENT', 'SKILL', 'RECOMMENDATION'] as const;
+export type FeedbackTargetType = (typeof FEEDBACK_TARGET_TYPES)[number];
+
+export const FEEDBACK_VERDICTS = ['AGREE', 'DISAGREE', 'UNCLEAR'] as const;
+export type FeedbackVerdict = (typeof FEEDBACK_VERDICTS)[number];
+
+/** Engine 16 (§5.1): no-action / practice / verify / prerequisite / reverify. */
+export const RECOMMENDATION_TYPES = ['NO_ACTION', 'PRACTICE', 'VERIFY', 'PREREQUISITE', 'REVERIFY'] as const;
+export type RecommendationType = (typeof RECOMMENDATION_TYPES)[number];
+
+export const RECOMMENDATION_STATES = ['ACTIVE', 'SUPERSEDED', 'COMPLETED', 'DISMISSED'] as const;
+export type RecommendationState = (typeof RECOMMENDATION_STATES)[number];
+
+/** Learner-facing AI Assistance Debt signal. NONE = not eligible; the 0-100 score is never the headline. */
+export const DEBT_BANDS = ['NONE', 'LOW', 'MODERATE', 'HIGH'] as const;
+export type DebtBand = (typeof DEBT_BANDS)[number];
 
 /** One skill of GET /v1/ledger. A skill without evidence is UNKNOWN with a null mean. */
 export interface SkillLedgerSummary {
@@ -200,6 +231,8 @@ export interface SkillLedgerSummary {
   debt_score: number;
   debt_eligible: boolean;
   debt_actionable: boolean;
+  /** Qualitative signal shown to the learner (NONE unless eligible). */
+  debt_band: DebtBand;
   evidence_count: number;
   performance_evidence_count: number;
   recent_delegation_count: number;
@@ -207,6 +240,9 @@ export interface SkillLedgerSummary {
   ledger_version: number | null;
   computed_as_of: string | null;
 }
+
+/** The P5 name of a ledger row as the student experience reads it. */
+export type LedgerEntry = SkillLedgerSummary;
 
 /** Body of GET /v1/ledger. */
 export interface LedgerResponse {

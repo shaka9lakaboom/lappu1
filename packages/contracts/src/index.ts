@@ -39,3 +39,4 @@ export interface Profile {
 export * from './raw-activity';
 export * from './courses';
 export * from './intelligence';
+export * from './experience';
