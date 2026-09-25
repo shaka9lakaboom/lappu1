@@ -30,6 +30,10 @@ export type SkillEdgeType = (typeof SKILL_EDGE_TYPES)[number];
 export const ASSESSMENT_TYPES = ['mcq', 'numeric', 'code', 'sql', 'short_response', 'reasoning'] as const;
 export type AssessmentType = (typeof ASSESSMENT_TYPES)[number];
 
+/** Why a bootstrap that is not READY waits: provider 429/503, the daily budget reserve, or backoff. */
+export const BOOTSTRAP_WAIT_REASONS = ['MODEL_BACKPRESSURE', 'MODEL_BUDGET_RESERVE', 'RETRY_AFTER_ERROR'] as const;
+export type BootstrapWaitReason = (typeof BOOTSTRAP_WAIT_REASONS)[number];
+
 /** Limits enforced by POST /v1/courses. */
 export const COURSE_LIMITS = {
   nameMaxChars: 200,
@@ -55,6 +59,7 @@ export interface Course {
   status: CourseStatus;
   graph_status: CourseGraphStatus;
   graph_version: number;
+  /** Fixed owner-facing summary of the last bootstrap error (never the raw error). */
   graph_error: string | null;
   graph_generated_at: string | null;
   role: CourseMemberRole;
@@ -62,6 +67,10 @@ export interface Course {
   /** Assessable (SKILL/SUBSKILL) nodes in the active overlay. */
   skill_count: number;
   bootstrap_job_state: string | null;
+  /** Why a queued bootstrap job waits (null = simply queued, running or finished). */
+  bootstrap_wait_reason: BootstrapWaitReason | null;
+  /** While queued or waiting: when the next attempt is due (ISO). In the past = no worker has claimed it yet. */
+  bootstrap_next_attempt_at: string | null;
   created_at: string;
   updated_at: string;
 }

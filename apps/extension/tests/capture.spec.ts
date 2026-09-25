@@ -211,7 +211,14 @@ test('capture -> queue -> authenticated sync, surviving outage and restart', asy
     return Promise.all(tabs.map((t) => chrome.tabs.sendMessage(t.id!, { type: 'CONTENT_PING' }).catch(() => null)));
   });
   expect(pings.filter(Boolean)).toEqual([
-    { type: 'CONTENT_STATUS', provider: 'chatgpt', state: 'tracking', conversationDetected: false },
+    {
+      type: 'CONTENT_STATUS',
+      provider: 'chatgpt',
+      state: 'tracking',
+      conversationDetected: false,
+      capture: 'ok', // the served page already shows the first (pending-layout) user message
+      visibleMessages: 1,
+    },
   ]);
 
   await renderState(chat, 'lightweight-streaming.html', `/uc/${CONV}`);

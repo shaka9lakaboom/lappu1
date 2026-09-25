@@ -119,6 +119,30 @@ python -m app.jobs.worker --once   # process what is runnable now, then exit
 Load the extension: `chrome://extensions` → enable **Developer mode** → **Load
 unpacked** → select `apps/extension/dist`.
 
+### Live demo (hackathon free-tier runtime)
+
+```bash
+npm run demo:check     # preflight: env files (names only), backend venv, ports 8000/3000
+npm run demo           # backend + worker (:8000) and web (:3000) in one terminal; Ctrl+C stops both
+npm run demo:backend   # or each on its own
+npm run demo:web
+npm run build:extension
+```
+
+`npm run demo` starts the backend on the free-tier runtime (ADR 0004): every generation task,
+the course bootstrap included, on `gemini-3.5-flash-lite` (12 requests/min, daily budget
+`gemini-3.5-flash-lite=500,gemini-3.7-flash=20,gemini-3.8-flash=20`, reserve 25). These
+non-secret overrides live in `scripts/demo.mjs` and reach only the backend process; secrets
+stay in `services/backend/.env` and `apps/web/.env.local`, and nothing is printed or written.
+Plain `npm run dev:backend` keeps the architecture default (`gemini-3.7-flash`).
+
+The backend runs without `--reload` and logs `worker: enabled`, `model routing: …` and
+`queue polling: active` at startup, and one `job deferred: …` line (job type, entity, next retry,
+attempts preserved) whenever the provider or the daily budget defers a job. The preflight
+refuses to start while another backend holds port 8000: two backends mean two workers
+claiming the same jobs, possibly on different models. A course whose bootstrap is deferred
+shows *Waiting to retry skill graph generation* with the reason and the automatic retry time.
+
 ## Test
 
 ```bash

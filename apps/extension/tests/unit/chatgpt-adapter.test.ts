@@ -1,6 +1,8 @@
+import { JSDOM } from 'jsdom';
 import { describe, expect, it } from 'vitest';
 
 import { ChatGPTAdapter } from '../../src/content/adapters/ChatGPTAdapter';
+import { captureStatus, captureStatusLabel } from '../../src/content/captureStatus';
 import { domFrom, fixtureUrl } from './helpers';
 
 function adapterFor(name: string, url = fixtureUrl(name)) {
@@ -141,6 +143,102 @@ describe('ChatGPT app layout (synthetic fixture)', () => {
     expect(adapter.isAssistantStreaming()).toBe(true);
     expect(messages[1].final).toBe(true);
     expect(messages[3].final).toBe(false);
+  });
+});
+
+describe('ChatGPT thread layout (signed-in app shell, structure from the live page)', () => {
+  const CONV = '68d5a7f0-0000-4000-8000-00000000c0de';
+  const ids = {
+    user1: '1f0c0a11-0000-4000-8000-000000000001',
+    assistant1: '2a0c0a22-0000-4000-8000-000000000002',
+    user2: '3b0c0a33-0000-4000-8000-000000000003',
+    assistant2: '4c0c0a44-0000-4000-8000-000000000004',
+  };
+
+  it('extracts user and assistant messages with their ids, order, parents and final state', () => {
+    const { adapter } = adapterFor('thread-layout.html');
+    const messages = adapter.scan();
+    expect(adapter.isAssistantStreaming()).toBe(false);
+    expect(messages.map((m) => [m.role, m.externalMessageId, m.messageIndex, m.final])).toEqual([
+      ['user', ids.user1, 0, true],
+      ['assistant', ids.assistant1, 1, true],
+      ['user', ids.user2, 2, true],
+      ['assistant', ids.assistant2, 3, true],
+    ]);
+    expect(messages.map((m) => m.externalParentMessageId)).toEqual([null, ids.user1, ids.assistant1, ids.user2]);
+    expect(new Set(messages.map((m) => m.externalConversationId))).toEqual(new Set([CONV]));
+  });
+
+  it('reads only the visible message text: no "You said" labels, toolbars or button labels', () => {
+    const { adapter } = adapterFor('thread-layout.html');
+    const [user1, assistant1, user2, assistant2] = adapter.scan();
+    expect(user1.contentText).toBe('What does len() return for a list?');
+    expect(user2.contentText).toBe('And for a dict?\nKeys or pairs?');
+    expect(assistant1.contentText).toBe(
+      'It returns the number of items, for example len([1, 2, 3]) is 3.\n\nitems = [1, 2, 3]\nprint(len(items))',
+    );
+    expect(assistant2.contentText).toBe('For a dict, len() counts the keys.');
+    for (const m of [user1, assistant1, user2, assistant2]) {
+      expect(m.contentText).not.toMatch(/You said|ChatGPT said|Python|Run|Copy|Edit/);
+      expect(m.attachmentMetadata).toEqual([]);
+    }
+  });
+
+  it('never treats the answer that is still generating as final', () => {
+    const { adapter } = adapterFor('thread-layout-streaming.html');
+    const messages = adapter.scan();
+    expect(adapter.isAssistantStreaming()).toBe(true);
+    expect(messages.map((m) => [m.role, m.final])).toEqual([
+      ['user', true],
+      ['assistant', true],
+      ['user', true],
+      ['assistant', false],
+    ]);
+    expect(messages[3].externalMessageId).toBe(ids.assistant2);
+  });
+
+  it('keeps an unfinished answer non-final even when no Stop button is visible', () => {
+    const { adapter, dom } = adapterFor('thread-layout-streaming.html');
+    dom.window.document.querySelector('button[aria-label="Stop streaming"]')!.setAttribute('aria-label', 'Send prompt');
+    expect(adapter.isAssistantStreaming()).toBe(false);
+    expect(adapter.scan()[3].final).toBe(false); // no selection id yet
+  });
+
+  it('ignores Stop controls that are not a generating answer', () => {
+    const { adapter, dom } = adapterFor('thread-layout.html');
+    const button = dom.window.document.querySelector('button[aria-label="Dictate"]')!;
+    button.setAttribute('aria-label', 'Stop dictation');
+    expect(adapter.isAssistantStreaming()).toBe(false);
+    button.setAttribute('aria-label', 'Stop streaming');
+    expect(adapter.isAssistantStreaming()).toBe(true);
+    expect(adapter.scan()[3].final).toBe(false);
+  });
+});
+
+describe('capture status', () => {
+  const url = 'https://chatgpt.com/c/68d5a7f0-0000-4000-8000-00000000c0de';
+  /** The page the live census saw before this adapter version: a conversation with no known message markup. */
+  const unknownLayout = new JSDOM(
+    `<main><div data-turn-key="x"><div data-future-turn><div class="whitespace-pre-wrap">hi</div></div></div></main>`,
+    { url },
+  );
+
+  it('reports an open conversation whose messages it cannot recognise', () => {
+    const adapter = new ChatGPTAdapter({ document: unknownLayout.window.document, location: () => url });
+    expect(adapter.getConversationExternalId()).not.toBeNull();
+    expect(adapter.scan()).toEqual([]);
+    const status = captureStatus({ conversationOpen: true, parsedMessages: adapter.scan().length, pageAgeMs: 20_000 });
+    expect(status).toBe('layout_unrecognized');
+    expect(captureStatusLabel(status, 0)).toBe('ChatGPT layout not recognized');
+  });
+
+  it('is healthy for a recognised conversation and patient while one is still rendering', () => {
+    const { adapter } = adapterFor('thread-layout.html');
+    const parsed = adapter.scan().length;
+    expect(captureStatus({ conversationOpen: true, parsedMessages: parsed, pageAgeMs: 20_000 })).toBe('ok');
+    expect(captureStatusLabel('ok', parsed)).toBe('Capturing (4 messages visible)');
+    expect(captureStatus({ conversationOpen: true, parsedMessages: 0, pageAgeMs: 1_000 })).toBe('waiting');
+    expect(captureStatus({ conversationOpen: false, parsedMessages: 0, pageAgeMs: 60_000 })).toBe('no_conversation');
   });
 });
 

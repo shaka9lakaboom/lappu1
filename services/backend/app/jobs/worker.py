@@ -16,7 +16,7 @@ import socket
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from functools import partial
 from uuid import uuid4
 
@@ -113,7 +113,15 @@ class Worker:
         return self.stats
 
     def run_forever(self, stop: threading.Event, poll_seconds: float = 2.0) -> None:
-        logger.info("worker %s started (job types: %s)", self.worker_id, ", ".join(self._handlers))
+        logger.info(
+            "worker: enabled (id %s; job types: %s)", self.worker_id, ", ".join(self._handlers)
+        )
+        logger.info(
+            "queue polling: active (every %.1fs, batch %d, stale locks recovered after %ds)",
+            poll_seconds,
+            self._batch_size,
+            int(self._stale_after.total_seconds()),
+        )
         while not stop.is_set():
             try:
                 claimed = self.run_once()
@@ -155,13 +163,21 @@ class Worker:
         with self._pool.connection() as conn:
             defer_job(conn, job.id, timedelta(seconds=delay), outcome)
         self.stats.backpressure += 1
+        next_retry = datetime.now(UTC) + timedelta(seconds=delay)
+        # The claim counted an attempt; defer_job gave it back.
         logger.warning(
-            "job %s %s: %s (%s); retrying in %ds without spending an attempt",
-            job.id,
+            "job deferred: %s %s:%s -> %s (%s); next retry %s (in %ds); "
+            "attempts %d/%d preserved (job %s)",
             job.job_type,
-            "request budget reserve reached" if budget else "model backpressure",
-            exc,
+            job.entity_type,
+            job.entity_id,
+            outcome,
+            f"{'request budget reserve reached' if budget else 'model backpressure'}: {exc}",
+            next_retry.strftime("%Y-%m-%d %H:%M:%S UTC"),
             delay,
+            max(job.attempts - 1, 0),
+            job.max_attempts,
+            job.id,
         )
 
     def _fail(self, job: ClaimedJob, exc: Exception) -> None:
@@ -253,7 +269,7 @@ def log_model_policy(gateway: ModelGateway, turn_analysis_mode: str) -> None:
         for s in gateway.budget_status()
     )
     logger.info(
-        "model policy %s: default=%s routine=%s embedding=%s turn_analysis=%s budget=[%s]",
+        "model routing: policy=%s default=%s routine=%s embedding=%s turn_analysis=%s budget=[%s]",
         routing.name,
         routing.default_model,
         routing.routine_model or routing.default_model,

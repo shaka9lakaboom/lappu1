@@ -254,6 +254,45 @@ describe('CaptureManager', () => {
   });
 });
 
+describe('CaptureManager + ChatGPTAdapter on the thread layout', () => {
+  it('emits a streaming answer once, when final, and never duplicates re-rendered messages', async () => {
+    const url = 'https://chatgpt.com/c/68d5a7f0-0000-4000-8000-00000000c0de';
+    const doc = domFrom('thread-layout-streaming.html', url).window.document;
+    const adapter = new ChatGPTAdapter({ document: doc, location: () => url, scanDelayMs: 100 });
+    const sent: UnboundEnvelope[] = [];
+    const manager = new CaptureManager({
+      adapter,
+      stableMs: 1000,
+      digest,
+      sink: { enqueue: async (events) => (sent.push(...events), { ok: true }) },
+    });
+    manager.start();
+    await vi.advanceTimersByTimeAsync(3000);
+    // While the second answer streams: both user messages and the finished first answer only.
+    expect(sent.map((e) => [e.role, e.message_index])).toEqual([
+      ['user', 0],
+      ['assistant', 1],
+      ['user', 2],
+    ]);
+
+    doc.querySelector('main')!.innerHTML = fixtureMain('thread-layout.html');
+    await vi.advanceTimersByTimeAsync(3000);
+    doc.querySelector('main')!.innerHTML = fixtureMain('thread-layout.html');
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(sent.map((e) => [e.role, e.external_message_id, e.revision_index])).toEqual([
+      ['user', '1f0c0a11-0000-4000-8000-000000000001', 0],
+      ['assistant', '2a0c0a22-0000-4000-8000-000000000002', 0],
+      ['user', '3b0c0a33-0000-4000-8000-000000000003', 0],
+      ['assistant', '4c0c0a44-0000-4000-8000-000000000004', 0],
+    ]);
+    expect(sent[3].content_text).toBe('For a dict, len() counts the keys.');
+    expect(sent[3].external_parent_message_id).toBe('3b0c0a33-0000-4000-8000-000000000003');
+    expect(sent.every((e) => e.external_conversation_id === '68d5a7f0-0000-4000-8000-00000000c0de')).toBe(true);
+    manager.stop();
+  });
+});
+
 describe('CaptureManager + ChatGPTAdapter on real DOM transitions', () => {
   it('turns pending -> streaming -> complete into exactly four final records', async () => {
     const dom = domFrom('lightweight-pending.html', 'https://chatgpt.com/');

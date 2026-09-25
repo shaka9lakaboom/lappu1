@@ -5,6 +5,7 @@ import { ApiError, apiBaseUrl, apiRequest } from './api';
 import {
   buildCourseRequest,
   graphStatusLabel,
+  graphWait,
   groupSkillsByTopic,
   importanceLabel,
   isGraphInProgress,
@@ -74,6 +75,57 @@ describe('course graph helpers', () => {
     expect(isGraphInProgress('READY')).toBe(false);
     expect(isGraphInProgress('FAILED')).toBe(false);
     expect([importanceLabel(0.9), importanceLabel(0.6), importanceLabel(0.5)]).toEqual(['Core', 'Important', 'Standard']);
+  });
+});
+
+describe('bootstrap wait status', () => {
+  const due = '2026-09-25T14:55:00Z';
+  const before = new Date('2026-09-25T14:50:00Z');
+  const waiting = {
+    graph_status: 'GENERATING',
+    bootstrap_job_state: 'PENDING',
+    bootstrap_wait_reason: 'MODEL_BACKPRESSURE',
+    bootstrap_next_attempt_at: due,
+    graph_error: null,
+  } as const;
+
+  it('labels a deferred bootstrap as waiting, not generating', () => {
+    expect(graphStatusLabel(waiting)).toBe('Waiting to retry skill graph generation');
+    expect(graphStatusLabel({ ...waiting, bootstrap_wait_reason: 'MODEL_BUDGET_RESERVE' })).toBe(
+      'Waiting to retry skill graph generation',
+    );
+    expect(graphStatusLabel({ ...waiting, graph_status: 'EMBEDDING' })).toBe('Waiting to retry skill indexing');
+    expect(graphStatusLabel({ ...waiting, bootstrap_job_state: 'PROCESSING', bootstrap_wait_reason: null })).toBe(
+      'Generating skill graph',
+    );
+    expect(graphStatusLabel({ ...waiting, bootstrap_job_state: 'RETRY_WAIT', bootstrap_wait_reason: 'RETRY_AFTER_ERROR' })).toBe(
+      'Retrying skill graph generation',
+    );
+    expect(graphStatusLabel({ ...waiting, graph_status: 'FAILED' })).toBe('Skill graph generation failed');
+  });
+
+  it('explains provider backpressure and the budget reserve with the next attempt', () => {
+    expect(graphWait(waiting, before)).toEqual({
+      message: 'Skill graph generation is temporarily waiting for the AI provider.',
+      nextAttemptAt: due,
+      overdue: false,
+    });
+    expect(graphWait({ ...waiting, bootstrap_wait_reason: 'MODEL_BUDGET_RESERVE' }, before)?.message).toMatch(
+      /AI request budget/,
+    );
+    expect(
+      graphWait({ ...waiting, bootstrap_wait_reason: 'RETRY_AFTER_ERROR', graph_error: 'The AI provider was unavailable.' }, before)
+        ?.message,
+    ).toBe('The last attempt did not succeed. The AI provider was unavailable.');
+  });
+
+  it('flags a due job that no worker claims, and stays quiet otherwise', () => {
+    expect(graphWait(waiting, new Date('2026-09-25T14:55:30Z'))?.overdue).toBe(false);
+    expect(graphWait(waiting, new Date('2026-09-25T14:57:00Z'))?.overdue).toBe(true);
+    const queued = { ...waiting, graph_status: 'PENDING', bootstrap_wait_reason: null } as const;
+    expect(graphWait(queued, before)).toEqual({ message: null, nextAttemptAt: due, overdue: false });
+    expect(graphWait({ ...waiting, bootstrap_next_attempt_at: null }, before)).toBeNull();
+    expect(graphWait({ ...waiting, graph_status: 'READY' }, before)).toBeNull();
   });
 });
 
