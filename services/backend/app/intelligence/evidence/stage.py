@@ -9,7 +9,8 @@ runs outside any transaction. A transient gateway error (429/503, spent budget)
 propagates, so the worker defers the job without spending an attempt; the P3A rows
 are already committed, and the retried job resumes at the pending segment
 without repeating the P3A calls. The ledger is recomputed after evidence commits:
-it is a rebuildable cache, so a crash in between is repaired by the replay.
+it is a rebuildable cache, so a crash in between is repaired by the replay. The
+recommendation queue (P5, Engine 16) is refreshed from the new ledger in the same way.
 """
 
 from dataclasses import dataclass
@@ -29,6 +30,7 @@ from app.intelligence.evidence.persist import (
 from app.intelligence.mastery.ledger import recompute_ledger
 from app.intelligence.policy import IntelligencePolicy
 from app.intelligence.processing.turn import ProcessingUnit
+from app.intelligence.recommendations.service import refresh_recommendations
 from app.intelligence.relevance.engine import ProcessingUnitText
 from app.model_gateway import ModelGateway, RunContext
 
@@ -109,5 +111,6 @@ def run_evidence_stage(
             recompute_ledger(
                 conn, unit.learner_id, skills, policy=policy, as_of=as_of or datetime.now(UTC)
             )
+            refresh_recommendations(conn, unit.learner_id, policy=policy)
         mapped = unit_is_mapped(conn, unit.anchor.id)
     return EvidenceStageResult(attributed, len(skills), mapped)

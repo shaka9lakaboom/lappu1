@@ -24,6 +24,7 @@ POLICY_KEYS = (
     "evidence",  # migration 0005
     "mastery",  # migration 0006
     "debt",  # migration 0006
+    "recommendations",  # migration 0007
 )
 
 
@@ -246,6 +247,28 @@ class DebtPolicy(_Strict):
         return self
 
 
+class DebtBands(_Strict):
+    """Learner-facing qualitative debt bands; the 0-100 score is never the headline (§10.4)."""
+
+    moderate_min: float = Field(gt=0, le=100)
+    high_min: float = Field(gt=0, le=100)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "DebtBands":
+        if not self.moderate_min < self.high_min:
+            raise ValueError("debt bands must satisfy moderate_min < high_min")
+        return self
+
+
+class RecommendationPolicy(_Strict):
+    # Appendix B: at most 2 verification recommendations per learner (learner burden).
+    max_active_verify: int = Field(ge=0, le=20)
+    # Mastery states of a prerequisite that make a PREREQUISITE recommendation. UNKNOWN can
+    # never be one: unknown is not weak.
+    prerequisite_gap_states: tuple[Literal["EMERGING", "DEVELOPING"], ...] = Field(min_length=1)
+    debt_bands: DebtBands
+
+
 class IntelligencePolicy(_Strict):
     retrieval: RetrievalPolicy
     mapping: MappingPolicy
@@ -256,6 +279,7 @@ class IntelligencePolicy(_Strict):
     evidence: EvidencePolicy
     mastery: MasteryPolicy
     debt: DebtPolicy
+    recommendations: RecommendationPolicy
 
     def snapshot(self) -> dict[str, Any]:
         """JSON form stored with each decision so it stays reproducible."""
@@ -267,7 +291,7 @@ class PolicyConfigError(RuntimeError):
 
 
 def verify_policy(pool: "ConnectionPool") -> IntelligencePolicy:
-    """Fail fast before a worker starts: the P3B/P4 keys come from migrations 0005/0006."""
+    """Fail fast before a worker starts: the P3B/P4/P5 keys come from migrations 0005-0007."""
     with pool.connection() as conn:
         return load_policy(conn)
 

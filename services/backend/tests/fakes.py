@@ -115,6 +115,11 @@ ARCHITECTURE_POLICY: dict[str, Any] = {
         "verification_recent_days": 30,
         "actionable_min_score": 15,
     },
+    "recommendations": {
+        "max_active_verify": 2,
+        "prerequisite_gap_states": ["EMERGING"],
+        "debt_bands": {"moderate_min": 15, "high_min": 25},
+    },
 }
 
 

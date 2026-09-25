@@ -156,7 +156,8 @@ class AttributionOutput(BaseModel):
 
 
 class EvidenceEvent(BaseModel):
-    """One immutable EvidenceEvent as stored (architecture §10.1)."""
+    """One immutable EvidenceEvent (architecture §10.1) with its provenance, as the learner
+    may inspect it (GET /v1/skills/{id}). No prompt, policy snapshot or model output."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -165,7 +166,12 @@ class EvidenceEvent(BaseModel):
     skill_id: UUID
     source_type: EvidenceSourceType
     source_id: UUID
+    # Captured-activity provenance (AI_ACTIVITY); null for verification / teacher evidence.
     attribution_id: UUID | None
+    mapping_id: UUID | None
+    decision_id: UUID | None
+    segment_id: UUID | None
+    raw_message_ids: tuple[UUID, ...]
     evidence_type: EvidenceType
     actor: EvidenceActor
     outcome_signal: OutcomeSignal
@@ -180,7 +186,10 @@ class EvidenceEvent(BaseModel):
     evidence_confidence: float = Field(ge=0, le=1)
     evidence_span: dict[str, str | None]
     model_run_ids: tuple[UUID, ...]
+    qualification_reason: str
     excluded: bool
+    exclusion_reason: str | None
+    excluded_at: datetime | None
     occurred_at: datetime
     created_at: datetime
 
@@ -190,6 +199,20 @@ class EvidenceEvent(BaseModel):
 MasteryState = Literal[
     "UNKNOWN", "EMERGING", "DEVELOPING", "DEMONSTRATED", "VERIFIED", "NEEDS_REVERIFICATION"
 ]
+
+# --- P5: student experience (feedback + recommendations; migration 0007) -----------------
+
+FeedbackAction = Literal["WRONG_SKILL", "DONT_COUNT", "EVALUATION"]
+FeedbackTargetType = Literal[
+    "EVIDENCE_EVENT", "SKILL_MAPPING", "ACTIVITY_SEGMENT", "SKILL", "RECOMMENDATION"
+]
+FeedbackVerdict = Literal["AGREE", "DISAGREE", "UNCLEAR"]
+# Engine 16 (§5.1): no-action / practice / verify / prerequisite / reverify.
+RecommendationType = Literal["NO_ACTION", "PRACTICE", "VERIFY", "PREREQUISITE", "REVERIFY"]
+RecommendationState = Literal["ACTIVE", "SUPERSEDED", "COMPLETED", "DISMISSED"]
+# Learner-facing AI Assistance Debt signal. NONE = not eligible (no repeated delegation):
+# the internal 0-100 score is never the headline (§10.4).
+DebtBand = Literal["NONE", "LOW", "MODERATE", "HIGH"]
 
 
 class SkillLedgerSummary(BaseModel):
@@ -215,12 +238,17 @@ class SkillLedgerSummary(BaseModel):
     debt_score: float = Field(ge=0, le=100)
     debt_eligible: bool
     debt_actionable: bool
+    debt_band: DebtBand
     evidence_count: int = Field(ge=0)
     performance_evidence_count: int = Field(ge=0)
     recent_delegation_count: int = Field(ge=0)
     last_evidence_at: datetime | None
     ledger_version: int | None
     computed_as_of: datetime | None
+
+
+# The P5 name of a ledger row as the student experience reads it.
+LedgerEntry = SkillLedgerSummary
 
 
 class LedgerResponse(BaseModel):

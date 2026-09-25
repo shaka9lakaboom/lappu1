@@ -20,6 +20,7 @@ from psycopg.types.json import Jsonb
 
 from app.intelligence.contracts import LedgerResponse, SkillLedgerSummary
 from app.intelligence.debt.engine import DebtResult, compute_debt
+from app.intelligence.explanation import debt_band
 from app.intelligence.mastery.engine import (
     ALGORITHM_VERSION,
     EvidenceRecord,
@@ -220,10 +221,12 @@ def read_ledger(
     *,
     policy: IntelligencePolicy,
     course_id: UUID | None = None,
+    skill_ids: Sequence[UUID] | None = None,
 ) -> LedgerResponse:
     """The learner's course skills (UNKNOWN when without evidence) plus every ledger row.
 
-    With `course_id`, only that course's skills (the learner must be a member)."""
+    With `course_id`, only that course's skills (the learner must be a member); with
+    `skill_ids`, only those skills."""
     if (
         course_id is not None
         and not conn.execute(
@@ -254,9 +257,14 @@ def read_ledger(
          where n.node_kind in ('SKILL', 'SUBSKILL')
            and ((sc.skill_id is not null and n.status = 'ACTIVE')
                 or (%(course)s::uuid is null and l.skill_id is not null))
+           and (%(skills)s::uuid[] is null or n.id = any(%(skills)s::uuid[]))
          order by l.skill_id is null, n.canonical_name
         """,
-        {"learner": learner_id, "course": course_id},
+        {
+            "learner": learner_id,
+            "course": course_id,
+            "skills": list(skill_ids) if skill_ids is not None else None,
+        },
     ).fetchall()
     prior = policy.mastery
     default_importance = policy.skill_graph.default_importance
@@ -285,6 +293,7 @@ def read_ledger(
                 debt_score=score,
                 debt_eligible=eligible,
                 debt_actionable=eligible and score >= policy.debt.actionable_min_score,
+                debt_band=debt_band(eligible, score, policy.recommendations.debt_bands),
                 evidence_count=r[15] or 0,
                 performance_evidence_count=r[16] or 0,
                 recent_delegation_count=r[17] or 0,
