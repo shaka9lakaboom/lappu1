@@ -3,7 +3,7 @@
 This record carries live implementation status (architecture §0.1). It must never
 claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisions:
 [`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A, 0004 free-tier ModelGateway,
-0005 P3B + P4, 0006 P5).
+0005 P3B + P4, 0006 P5, 0007 P6).
 
 **Last updated:** 2026-09-25
 
@@ -25,28 +25,61 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1, P2 + P3A and P3B + P4 are merged. **`main` = `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8`** (merge of PR #4). |
+| Default branch | `main`. P0, P1, P2 + P3A, P3B + P4 and P5 are merged. **`main` = `a0e6982546c82bb4dbb1920894fb6d4711ccfa34`** (merge of PR #5). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
 | P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
-| Development branch | `skillmirror-p5-student-experience` (P5, from `ab2d73d`) |
-| Previous branch | `skillmirror-p3b-p4-evidence-mastery-debt` (merged in PR #4) |
+| P5 merge commit | `a0e6982546c82bb4dbb1920894fb6d4711ccfa34` (PR #5, head `0f12dc7`) |
+| Development branch | `skillmirror-p6-verification-loop` (P6, from `a0e6982`) |
+| Previous branch | `skillmirror-p5-student-experience` (merged in PR #5) |
 | P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | P2 + P3A commits (merged) | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
 | CI (P3B + P4) | green on the PR #4 head before the merge |
 | CI (P2 + P3A) | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P5 → `main`: opened after CI is green; **not merged** by the agent. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
+| Pull request | P6 → `main`: opened after the hosted acceptance and a green CI; **not merged** by the agent. P5: PR #5, **merged** as `a0e6982`. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
-**Current phase: P5 — Complete Student Experience** (dashboard, Skill Map, Skill Detail with
+**Current phase: P6 — Verification Loop.** Branch `skillmirror-p6-verification-loop` from `main`
+`a0e6982` (the P5 merge). Its migration is **`0008_verification.sql`**. Hosted has **0001–0007**;
+0008 is applied to hosted only with the owner's explicit approval. Decisions:
+[ADR 0007](decisions/0007-p6-verification-loop.md). **P7 will be migration `0009`.**
+**Status: IMPLEMENTED AND PASSING LOCALLY; hosted migration 0008 AWAITING THE OWNER'S APPROVAL;
+hosted real acceptance NOT RUN yet.**
+
+```
+VERIFY / REVERIFY recommendation -> planner (no model call) -> PLANNED -> 1 VERIFICATION_GENERATION
+  -> validator -> READY -> start/resume -> submit (stored, idempotent) -> deterministic grade
+  (or rubric evaluation) -> result + VERIFICATION EvidenceEvent + EVALUATED (one transaction)
+  -> recompute_ledger -> refresh_recommendations
+```
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| Migration 0008 applies from a clean reset; 0001–0007 unchanged | PASS (local) | `supabase db reset` 0001–0008; pgTAP compares the applied statements of 0001–0007 with the hosted ones; git blob ids pinned |
+| pgTAP 0008 (lifecycle, transitions, RLS, grants, uniqueness, evidence ↔ result, ledger guard, server-only items) | PASS: 79 | `supabase/tests/0008_verification.test.sql`; total 288 |
+| Planner only from VERIFY / REVERIFY; budget 2/day; cooldowns; idempotent | PASS | `test_verification_planner.py`, `test_verification_db.py` |
+| Generator + validator (skill, band, prerequisites, duplicates, code/sql, answer key, ≤ 3 attempts, cache) | PASS | `test_verification_validator.py`, `test_verification_generator.py`, DB regeneration tests |
+| Deterministic graders; rubric evaluator (repair once, untrusted → no evidence, 429/503 deferral) | PASS | `test_verification_grading.py`, DB tests |
+| Result → exactly one VERIFICATION EvidenceEvent; never a direct ledger write | PASS | DB tests (ledger unchanged until recompute), pgTAP guard |
+| VERIFIED gates; one isolated failure keeps VERIFIED; stale / contradicted → NEEDS_REVERIFICATION | PASS | `test_mastery_verification.py` |
+| Debt 0.2 / 0.6 / 1.0; no debt without delegation | PASS | `test_debt_verification.py`, DB + acceptance |
+| Replay / crash safety (duplicate start/submit/jobs, crash before/after evidence, backpressure, budget) | PASS | `test_verification_db.py` |
+| Security (own rows only, no answer key before grading, clients cannot write, anon nothing) | PASS | pgTAP + DB tests |
+| Local acceptance (fake provider) + browser walkthrough | **PASS**: 15/15 + 1 passed | `scripts/acceptance_p6.py`, `e2e/p6-acceptance.spec.ts` |
+| Hosted migration 0008 | **PENDING the owner's approval** | — |
+| Hosted real acceptance (1 Flash-Lite generation, 0 evaluation, 0 embedding) | **NOT RUN** (after approval) | `scripts/acceptance_p6_hosted.py`, rehearsed locally on both fixture paths |
+
+### Previous phase: P5 (merged in PR #5, `a0e6982`)
+
+**P5 — Complete Student Experience** (dashboard, Skill Map, Skill Detail with
 "Why?", enriched Activity, corrections, deterministic recommendations). Branch
-`skillmirror-p5-student-experience` from `main` `ab2d73d`. Decisions:
+`skillmirror-p5-student-experience` from `main` `ab2d73d`, merged in PR #5 as `a0e6982`. Decisions:
 [ADR 0006](decisions/0006-p5-student-experience.md).
-**Status: COMPLETE. MIGRATIONS 0001–0007 ON HOSTED (0007 pushed 2026-09-25 with the owner's
-approval, verified read-only). The local acceptance and the hosted acceptance PASSED with 0
-generation and 0 embedding requests.** P6 verification will be **0008**; nothing in P6 was started.
+**Status: COMPLETE and MERGED. MIGRATIONS 0001–0007 ON HOSTED (0007 pushed 2026-09-25 with the
+owner's approval, verified read-only). The local acceptance and the hosted acceptance PASSED with 0
+generation and 0 embedding requests.**
 
 ```
 GET /v1/ledger · GET /v1/skills/{id} · GET /v1/activity · GET /v1/recommendations  (read, explain)
@@ -161,8 +194,10 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - The owner decided not to spend more 3.7 requests waiting for capacity.
   - The same ModelGateway pipeline has passed against another supported real Gemini model, so
     this provider outage is not a product blocker.
-- The free tier is unchanged: 20 generation requests per day and 5 per minute, per project and
-  model, reset at midnight Pacific. No billing or paid tier was used.
+- No billing or paid tier was used. *(Corrected 2026-09-25: this record used to say "20
+  generation requests per day and 5 per minute" for every model. That is the limit of
+  `gemini-3.7-flash` / `gemini-3.8-flash` only; see *Gemini free-tier limits* below for the
+  owner-verified, dated values per model.)*
 
 | Gate | State | Evidence |
 | --- | --- | --- |
@@ -323,6 +358,28 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   Security advisors: one WARN, *Leaked Password Protection Disabled*. This is an Auth project
   setting, not from the migrations.
 
+## Gemini free-tier limits (owner-verified in Google AI Studio on 2026-09-25)
+
+These are **dated operational limits** of this project's free tier, not architecture assumptions:
+Google can change them, so recheck before a live run. Billing / paid tier stays **off**.
+
+| Model | RPM | TPM | RPD | Role |
+| --- | --- | --- | --- | --- |
+| `gemini-3.5-flash-lite` | 15 | 250K | **500** | hackathon operational runtime (environment override only) |
+| `gemini-3.7-flash` | 5 | 250K | 20 | architecture / committed default |
+| `gemini-3.8-flash` | 5 | 250K | 20 | second fallback |
+| `gemini-embedding-2` | 100 | 30K | 1000 | embeddings |
+
+- The architecture / default generation model remains **`gemini-3.7-flash`** (code,
+  `.env.example`, ADRs). The code's default budget (`MODEL_DAILY_REQUEST_LIMITS=
+  gemini-3.7-flash=20,gemini-3.8-flash=20`, reserve 2) matches that default.
+- The hackathon runtime override (never committed): `GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite`
+  and/or `GEMINI_ROUTINE_MODEL=gemini-3.5-flash-lite`, `GEMINI_GENERATION_RPM=12`,
+  `MODEL_DAILY_REQUEST_LIMITS=gemini-3.5-flash-lite=500,gemini-3.7-flash=20,gemini-3.8-flash=20`,
+  `MODEL_QUOTA_RESERVE=25`.
+- Quotas are per project and model and reset at midnight Pacific. Every provider request counts
+  toward the local budget, including 429/503 responses.
+
 ## Intelligence configuration
 
 | Item | Value |
@@ -337,10 +394,11 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 | P3B / P4 versions | attribution `p3b-v1` (idempotency key), `attributor/p3b-v1`, qualifier `evidence/p3b-v1`, ledger `ledger/p4-v1` |
 | Deterministic stages (no model call) | evidence strength = base × (0.75 + 0.5 d) × independence × min(mapping, attribution); mastery weighted Beta(1,1), recency half-life 180 d in whole UTC days, UNKNOWN below support 1.0; debt eligible at ≥ 2 recent (30 d) accepted high-confidence AI/SHARED delegations; `100 × pressure × gap × importance × confidence × 0.6` before P6; actionable ≥ 15 |
 | Turn execution | `TURN_ANALYSIS_MODE=combined` (default): retrieval → 1 `TURN_ANALYSIS` call → gate → ≤ 1 adjudication; `staged` selectable |
-| Routing policy | `architecture-default` (everything on `GEMINI_GENERATION_MODEL`); `free-tier` when `GEMINI_ROUTINE_MODEL` is set (routine turn tasks on it; graph and adjudication on the default model) |
-| Request budget | `MODEL_DAILY_REQUEST_LIMITS=gemini-3.7-flash=20,gemini-3.8-flash=20`, `MODEL_QUOTA_RESERVE=2`, quota day midnight Pacific; deferral outcome `MODEL_BUDGET_RESERVE` |
+| Routing policy | `architecture-default` (everything on `GEMINI_GENERATION_MODEL`); `free-tier` when `GEMINI_ROUTINE_MODEL` is set (routine tasks on it - the turn tasks, attribution and, since P6, `VERIFICATION_GENERATION` / `VERIFICATION_EVALUATION`; graph and adjudication on the default model) |
+| Request budget | code default `MODEL_DAILY_REQUEST_LIMITS=gemini-3.7-flash=20,gemini-3.8-flash=20`, `MODEL_QUOTA_RESERVE=2` (the architecture-default models); hackathon runtime adds `gemini-3.5-flash-lite=500` with reserve 25 (see *Gemini free-tier limits*); quota day midnight Pacific; deferral outcome `MODEL_BUDGET_RESERVE` |
 | Result cache | exact key (provider, model, task, prompt version, input hash); memory + durable (`model_runs`) for structured output, memory for query vectors; hits logged with `cache_source_run_id` |
-| Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE` |
+| Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE`, **P6:** `GENERATE_VERIFICATION`, `GRADE_VERIFICATION` (entity: the verification session) |
+| P6 versions | prompts `verification-generation/v1`, `verification-evaluation/v1` (both ROUTINE tasks); planner `verification-planner/p6-v1`, generator `verification-generator/p6-v1`, validator `verification-validator/p6-v1`, graders `grader/mcq-exact-v1`, `grader/numeric-tolerance-v1`, `grader/short-exact-v1`, evaluator `evaluator/rubric-ai-v1`, evidence `verification/p6-v1`; ledger **`ledger/p6-v1`**, recommendations **`recommendations/p6-v1`** |
 | P5 versions (no model call) | recommendations `recommendations/p5-v1` (Engine 16: REVERIFY → VERIFY (actionable debt, max 2 active) → PREREQUISITE (EMERGING prerequisite) → PRACTICE → NO_ACTION); explanation codes + gates; debt bands NONE/LOW/MODERATE/HIGH at 15/25 |
 
 ## Hosted acceptance P5 (2026-09-25): PASS, no model call
@@ -513,7 +571,8 @@ Evidence: `test-results/p2-p3a-acceptance/evidence.json` (git-ignored; ids only)
 - `GEMINI_GENERATION_MODEL=gemini-3.5-flash-lite`
 - `MODEL_DAILY_REQUEST_LIMITS=…,gemini-3.5-flash-lite=10`. Its RPD cannot be read without OAuth
   (no `gcloud`; the Gemini API exposes no rate limits). This value is a **local spending cap**
-  for the run, with the reserve of 2, not a claim about Google's quota.
+  for the run, with the reserve of 2, not a claim about Google's quota. *(Later the same day the
+  owner read the real limit in AI Studio: 500 RPD; see *Gemini free-tier limits*.)*
 
 **Sequence and provider requests:**
 
@@ -617,7 +676,7 @@ validation item after its quota resets. The 3.7 live acceptance has **not** pass
 
 **Smoke benchmark:** the 12-case `p3a-smoke` set needs about 36 generation calls, which exceeds
 the free tier's 20/day. Its schema and scorer are covered deterministically in CI; the live run
-is deferred.
+is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 RPD, the run fits.)*
 
 ## URLs and versions (local)
 
@@ -713,13 +772,13 @@ auth round trip.
 - **Turns processed before migration 0005** (the P2/P3A acceptance turns) have P3A rows but no
   attribution. A replay of their jobs would attribute them (1 request each); nothing does so
   automatically.
-- **Gemini free tier:** 20 generation requests/day and 5/minute per project and model. With ADR 0004 a normal turn needs 1 generation request (ambiguous: 2), and the smoke benchmark about 12–16 instead of about 36. Jobs defer instead of failing while over quota or at the budget reserve.
+- **Gemini free tier (owner-verified 2026-09-25, see *Gemini free-tier limits*):** `gemini-3.5-flash-lite` 15 RPM / 500 RPD; `gemini-3.7-flash` and `gemini-3.8-flash` 5 RPM / 20 RPD; `gemini-embedding-2` 100 RPM / 1000 RPD. With ADR 0004 a normal turn needs 1 generation request (ambiguous: 2), and the smoke benchmark about 12–16 instead of about 36. Jobs defer instead of failing while over quota or at the budget reserve.
 - **`turn-analysis/v1` is accepted live on `gemini-3.5-flash-lite`**, twice, at attempt 1 each. It has not been exercised on `gemini-3.7-flash` yet. If 3.7 ever rejects it, set `TURN_ANALYSIS_MODE=staged` (no code change).
 - **`gemini-3.7-flash` live validation is pending.** On 2026-09-25, after the quota reset, 5 of 6 requests got HTTP 503 "high demand". Every 503 counts toward the local budget, so the worker was stopped instead of letting jobs cycle.
 - **Flash-Lite graph size:** its graph has 24 skills, inside the 20–80 hard bounds but below the 30–60 target. The P1 turn "Explain binary search in one sentence." was rated low relevance (`STOP`). Both are quality observations for the P8 benchmark and calibration, not gate failures.
 - **Combined mode retrieves once per unit.** A multi-task turn shares one top-20 pool between its segments, and a non-learning turn still costs one query embedding.
 - **Query vectors are cached in memory only.** After a restart, an identical turn costs 1 embedding request; the generation still comes from the durable cache.
-- **`gemini-3.5-flash-lite` quota is unknown.** It works live on this key, but its free-tier RPD/RPM is only visible in AI Studio or Cloud Quotas (ADR 0004 §7). Routing stays off by default, and the acceptance used a local cap of 10.
+- **`gemini-3.5-flash-lite` quota** (corrected 2026-09-25): the owner read it in AI Studio: 15 RPM / 250K TPM / 500 RPD. It is the hackathon operational runtime, set in the environment only; routing stays off by default in the code, and the architecture default stays `gemini-3.7-flash`.
 - **Real-model quality is only spot-checked** (one graph, two turns). Mapping calibration and the adjudication band need the benchmark (P8).
 - Hosted Auth: *Leaked Password Protection* is disabled (advisor WARN; an owner setting).
 - Lexical scores are relative to the best match in the pool (relative score fusion). A pool of
@@ -758,16 +817,12 @@ auth round trip.
 
 ## Exact next action
 
-1. **Review and merge the P5 pull request** (`skillmirror-p5-student-experience` → `main`) once
-   its CI is green. The agent does not merge it.
-2. **Then P6: verification**, on a new branch from the updated `main`. Its migration is
-   **`0008`**. P6 turns VERIFY recommendations into challenges, adds the VERIFICATION source to
-   `VERIFICATION_SOURCES`, and relaxes the `skill_ledger_no_verification_states_before_p6`
-   check. The P5 engine already handles VERIFIED / NEEDS_REVERIFICATION / REVERIFY. Nothing in
-   P6 was started.
-3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
+1. **P6: verification** on `skillmirror-p6-verification-loop` (from `a0e6982`). Its migration
+   **`0008`** is implemented and tested locally first; it reaches hosted only after the owner's
+   explicit approval, followed by the hosted real acceptance (P7 will be `0009`).
+2. **Optional, when quota allows** (Flash-Lite has 500 RPD):
    - one live turn in which the learner explicitly delegates a mapped skill (AI-actor
      evidence, single delegation → no debt): about 2 requests
    - the 12-case P3A smoke benchmark: about 12–16 requests
-4. **`gemini-3.7-flash` live validation** stays pending until Google's capacity allows. The
+3. **`gemini-3.7-flash` live validation** stays pending until Google's capacity allows. The
    architecture default is unchanged.
