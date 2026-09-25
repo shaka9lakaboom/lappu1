@@ -88,7 +88,7 @@ export default async function AdminBenchmarkPage() {
                           {formatTime(run.finished_at)}
                         </p>
                         {parts.source ? (
-                          <p className="text-xs text-muted-foreground" data-testid="benchmark-source">
+                          <p className="break-all text-xs text-muted-foreground" data-testid="benchmark-source">
                             Failure cause from the {parts.source}; the stored row keeps only the case id.
                           </p>
                         ) : null}
