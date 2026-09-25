@@ -4,7 +4,8 @@ Deterministic rules - no model call - over the ledger (mastery + AI Assistance D
 course importance, the skill's prerequisites and the available evidence. One next action per
 skill; the first matching rule wins:
 
-    1. NEEDS_REVERIFICATION                        -> REVERIFY      VERIFICATION_STALE
+    1. NEEDS_REVERIFICATION                        -> REVERIFY      VERIFICATION_STALE /
+                                                                    VERIFICATION_CONTRADICTED
     2. actionable debt (eligible, score >= the actionable threshold), and among the
        max_active_verify highest debts             -> VERIFY        REPEATED_DELEGATION_UNVERIFIED
     3. EMERGING / DEVELOPING with a prerequisite
@@ -28,8 +29,10 @@ Invariants:
 * Learner burden (§11.1, Appendix B): at most max_active_verify VERIFY recommendations at a
   time; further actionable skills fall through to the next rule, marked verify_deferred.
 
-VERIFIED and NEEDS_REVERIFICATION are unreachable before P6 (ADR 0005 §19); the rules
-already handle them so P6 only has to produce the states.
+P6 (ADR 0007) makes VERIFIED and NEEDS_REVERIFICATION reachable. REVERIFY names why the
+verification needs refreshing: it is stale, or newer evidence materially contradicts it. The
+verification planner (app/intelligence/verification/planner.py) turns ACTIVE VERIFY / REVERIFY
+recommendations into verification sessions; it never reinterprets raw AI usage itself.
 """
 
 from collections.abc import Iterable
@@ -40,7 +43,8 @@ from uuid import UUID
 from app.intelligence.explanation import debt_band
 from app.intelligence.policy import IntelligencePolicy
 
-ALGORITHM_VERSION = "recommendations/p5-v1"
+# p6-v1: REVERIFY distinguishes a stale from a contradicted verification.
+ALGORITHM_VERSION = "recommendations/p6-v1"
 
 RecommendationTypeName = Literal["NO_ACTION", "PRACTICE", "VERIFY", "PREREQUISITE", "REVERIFY"]
 
@@ -68,6 +72,8 @@ class SkillSignal:
     performance_evidence_count: int
     ledger_version: int | None
     prerequisites: tuple[PrerequisiteSignal, ...] = ()
+    # NEEDS_REVERIFICATION only: STALE or CONTRADICTED (the mastery engine's standing).
+    reverification_reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -154,7 +160,12 @@ def decide(
         )
 
     if state == "NEEDS_REVERIFICATION":
-        return make("REVERIFY", _scaled(80, 10, importance), "VERIFICATION_STALE")
+        reason = (
+            "VERIFICATION_CONTRADICTED"
+            if signal.reverification_reason == "CONTRADICTED"
+            else "VERIFICATION_STALE"
+        )
+        return make("REVERIFY", _scaled(80, 10, importance), reason)
     if verify and actionable:
         return make(
             "VERIFY", _scaled(60, 19, signal.debt_score / 100), "REPEATED_DELEGATION_UNVERIFIED"

@@ -25,6 +25,7 @@ POLICY_KEYS = (
     "mastery",  # migration 0006
     "debt",  # migration 0006
     "recommendations",  # migration 0007
+    "verification",  # migration 0008
 )
 
 
@@ -269,6 +270,114 @@ class RecommendationPolicy(_Strict):
     debt_bands: DebtBands
 
 
+# --- P6 verification (migration 0008; engineering defaults in ADR 0007) -----------------
+
+VerificationAssessmentTypeName = Literal[
+    "mcq", "numeric", "code", "sql", "short_response", "reasoning"
+]
+# Executable challenges need the deterministic sandbox (post-V1). An LLM rubric is not an
+# equivalent grader, so the policy may not even claim them as supported.
+SANDBOX_ASSESSMENT_TYPES = ("code", "sql")
+OutcomeSignalName = Literal["CORRECT", "INCORRECT", "PARTIAL"]
+
+
+class VerificationPlannerPolicy(_Strict):
+    # Appendix B: at most 2 unsolicited verification recommendations per learner per day.
+    max_daily_unsolicited: int = Field(ge=0, le=20)
+    # §11.1: a recently passed verification creates a cooldown.
+    cooldown_after_pass_days: float = Field(ge=0, le=365)
+    cooldown_after_fail_days: float = Field(ge=0, le=365)
+    # An abandoned check is not failure evidence, and is not re-issued at once either.
+    cooldown_after_abandon_days: float = Field(ge=0, le=365)
+    retry_after_generation_failure_hours: float = Field(ge=0, le=24 * 365)
+    # A started check left untouched this long is abandoned (never failure evidence).
+    abandon_in_progress_after_days: float = Field(gt=0, le=365)
+
+
+class VerificationDifficultyPolicy(_Strict):
+    """The planned band around the skill's difficulty (Appendix B.1: only valid in the band)."""
+
+    band_half_width: float = Field(ge=0, le=0.5)
+    min: float = Field(ge=0, le=1)
+    max: float = Field(ge=0, le=1)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "VerificationDifficultyPolicy":
+        if not self.min <= self.max:
+            raise ValueError("verification difficulty must satisfy min <= max")
+        return self
+
+
+class VerificationGenerationPolicy(_Strict):
+    # Initial generation + regenerations (§11.3: "regenerate (max 2 attempts)").
+    max_attempts: int = Field(ge=1, le=5)
+    supported_assessment_types: tuple[VerificationAssessmentTypeName, ...] = Field(min_length=1)
+    # Bounded history of earlier prompts (learner + skill) shown to the generator.
+    history_limit: int = Field(ge=0, le=20)
+    # Token-set similarity above which a challenge is a material duplicate.
+    duplicate_max_similarity: float = Field(gt=0, le=1)
+    min_prompt_chars: int = Field(ge=20, le=4000)
+    max_prompt_chars: int = Field(ge=20, le=4000)
+    min_estimated_minutes: int = Field(ge=1, le=120)
+    max_estimated_minutes: int = Field(ge=1, le=120)
+
+    @model_validator(mode="after")
+    def _supported(self) -> "VerificationGenerationPolicy":
+        sandbox = set(self.supported_assessment_types) & set(SANDBOX_ASSESSMENT_TYPES)
+        if sandbox:
+            raise ValueError(f"{sorted(sandbox)} need the sandbox grader, which V1 does not have")
+        if not self.min_prompt_chars <= self.max_prompt_chars:
+            raise ValueError("min_prompt_chars must not exceed max_prompt_chars")
+        if not self.min_estimated_minutes <= self.max_estimated_minutes:
+            raise ValueError("min_estimated_minutes must not exceed max_estimated_minutes")
+        return self
+
+
+class VerificationGradingPolicy(_Strict):
+    numeric_relative_tolerance: float = Field(ge=0, le=0.5)
+    numeric_absolute_tolerance: float = Field(ge=0, le=1)
+    max_response_chars: int = Field(ge=100, le=20000)
+    short_response_max_chars: int = Field(ge=20, le=20000)
+    numeric_max_chars: int = Field(ge=8, le=200)
+    # Rubric grading: pass from this fraction of the rubric points.
+    rubric_pass_min_score: float = Field(gt=0, le=1)
+    # Below this evaluator confidence the grade is not trusted: no result, no evidence.
+    min_ai_grading_confidence: float = Field(gt=0, le=1)
+
+    @model_validator(mode="after")
+    def _limits(self) -> "VerificationGradingPolicy":
+        if self.short_response_max_chars > self.max_response_chars:
+            raise ValueError("short_response_max_chars must not exceed max_response_chars")
+        return self
+
+
+class ReverificationPolicy(_Strict):
+    """When newer evidence materially contradicts a verification (§10.3 NEEDS_REVERIFICATION).
+
+    Conservative on purpose: a single isolated later failure is never enough (§16 "One
+    isolated failure ... does not erase strong history"), so the minimum is 2."""
+
+    min_contradicting_failures: int = Field(ge=2, le=20)
+    contradicting_evidence_types: tuple[EvidenceTypeName, ...] = Field(min_length=1)
+    contradicting_outcome_signals: tuple[OutcomeSignalName, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _only_failures(self) -> "ReverificationPolicy":
+        if "CORRECT" in self.contradicting_outcome_signals:
+            raise ValueError("a correct result never contradicts a verification")
+        if set(self.contradicting_evidence_types) & set(ZERO_STRENGTH_TYPES):
+            raise ValueError("exposure/observation carry no performance: they cannot contradict")
+        return self
+
+
+class VerificationPolicy(_Strict):
+    planner: VerificationPlannerPolicy
+    difficulty: VerificationDifficultyPolicy
+    generation: VerificationGenerationPolicy
+    grading: VerificationGradingPolicy
+    reverification: ReverificationPolicy
+
+
 class IntelligencePolicy(_Strict):
     retrieval: RetrievalPolicy
     mapping: MappingPolicy
@@ -280,6 +389,7 @@ class IntelligencePolicy(_Strict):
     mastery: MasteryPolicy
     debt: DebtPolicy
     recommendations: RecommendationPolicy
+    verification: VerificationPolicy
 
     def snapshot(self) -> dict[str, Any]:
         """JSON form stored with each decision so it stays reproducible."""
@@ -291,7 +401,7 @@ class PolicyConfigError(RuntimeError):
 
 
 def verify_policy(pool: "ConnectionPool") -> IntelligencePolicy:
-    """Fail fast before a worker starts: the P3B/P4/P5 keys come from migrations 0005-0007."""
+    """Fail fast before a worker starts: the P3B-P6 keys come from migrations 0005-0008."""
     with pool.connection() as conn:
         return load_policy(conn)
 

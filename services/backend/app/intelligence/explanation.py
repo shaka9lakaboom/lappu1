@@ -71,6 +71,8 @@ def mastery_explanation_code(
     support: float,
     has_application: bool,
     policy: MasteryPolicy,
+    verification_standing: str = "NONE",
+    recently_verified: bool = False,
 ) -> str:
     """Why the ledger holds this state, as a stable code the UI turns into plain language."""
     if state == "UNKNOWN":
@@ -93,8 +95,18 @@ def mastery_explanation_code(
     if state == "DEMONSTRATED":
         return "INDEPENDENT_EVIDENCE_SUPPORTS"
     if state == "VERIFIED":
-        return "RECENT_VERIFICATION"
-    return "VERIFICATION_STALE"  # NEEDS_REVERIFICATION
+        if recently_verified and verified_gates_met(mastery_mean, support, policy):
+            return "RECENT_VERIFICATION"
+        # Entered through the gates at a recent check and held: a later isolated result is
+        # recorded (it lowers the estimate) but does not undo the check.
+        return "VERIFICATION_HELD"
+    if verification_standing == "CONTRADICTED":  # NEEDS_REVERIFICATION
+        return "VERIFICATION_CONTRADICTED"
+    return "VERIFICATION_STALE"
+
+
+def verified_gates_met(mastery_mean: float, support: float, policy: MasteryPolicy) -> bool:
+    return mastery_mean >= policy.verified_min_mean and support >= policy.verified_min_support
 
 
 def mastery_gates(
@@ -104,9 +116,12 @@ def mastery_gates(
     support: float,
     has_application: bool,
     policy: MasteryPolicy,
+    verification: bool = False,
+    recently_verified: bool = False,
 ) -> list[dict[str, Any]]:
     """The DEMONSTRATED gates and whether each is met. While UNKNOWN only the evidence gate is
-    shown: no mean is exposed or judged without enough evidence."""
+    shown: no mean is exposed or judged without enough evidence. Once the skill has a
+    SkillMirror verification (or a verified state), the VERIFIED entry gates follow."""
     gates: list[dict[str, Any]] = [
         {
             "code": "ENOUGH_EVIDENCE",
@@ -137,4 +152,25 @@ def mastery_gates(
             "required": None,
         },
     ]
+    if verification or state in ("VERIFIED", "NEEDS_REVERIFICATION"):
+        gates += [
+            {
+                "code": "RECENT_CHECK_PASSED",
+                "met": recently_verified,
+                "current": None,
+                "required": None,
+            },
+            {
+                "code": "VERIFIED_RESULTS",
+                "met": mastery_mean >= policy.verified_min_mean,
+                "current": round(mastery_mean, 6),
+                "required": policy.verified_min_mean,
+            },
+            {
+                "code": "VERIFIED_EVIDENCE",
+                "met": support >= policy.verified_min_support,
+                "current": round(support, 6),
+                "required": policy.verified_min_support,
+            },
+        ]
     return gates

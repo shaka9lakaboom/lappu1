@@ -87,7 +87,9 @@ def derive(
     policy: IntelligencePolicy,
     as_of: datetime,
 ) -> tuple[MasteryResult, DebtResult]:
-    mastery = compute_mastery(records, policy.mastery, as_of)
+    mastery = compute_mastery(
+        records, policy.mastery, as_of, reverification=policy.verification.reverification
+    )
     debt = compute_debt(records, mastery, importance=importance, policy=policy.debt, as_of=as_of)
     return mastery, debt
 
@@ -96,6 +98,8 @@ def _policy_snapshot(policy: IntelligencePolicy) -> dict:
     return {
         "mastery": policy.mastery.model_dump(mode="json"),
         "debt": policy.debt.model_dump(mode="json"),
+        # P6: the reverification (contradiction) rule decides VERIFIED vs NEEDS_REVERIFICATION.
+        "reverification": policy.verification.reverification.model_dump(mode="json"),
     }
 
 
