@@ -9,6 +9,9 @@ import type {
   LedgerEntry,
   MasteryExplanation,
   Recommendation,
+  VerificationChallenge,
+  VerificationSessionSummary,
+  VerificationsResponse,
 } from '@skillmirror/contracts';
 
 export const SKILL = '11111111-1111-4111-8111-111111111111';
@@ -219,6 +222,69 @@ export function activityRow(overrides: Partial<ActivityRow> = {}): ActivityRow {
         correction: null,
       },
     ],
+    ...overrides,
+  };
+}
+
+export const SESSION = '77777777-7777-4777-8777-777777777777';
+
+export function verificationSession(overrides: Partial<VerificationSessionSummary> = {}): VerificationSessionSummary {
+  return {
+    id: SESSION,
+    skill_id: SKILL,
+    canonical_name: 'Choosing LEFT JOIN',
+    course_id: COURSE,
+    state: 'READY',
+    status: 'READY',
+    trigger_type: 'VERIFY',
+    reason_code: 'REPEATED_DELEGATION_UNVERIFIED',
+    recommendation_id: '44444444-4444-4444-8444-444444444444',
+    planned_difficulty: 0.9,
+    assessment_type: 'mcq',
+    estimated_minutes: 2,
+    failure_code: null,
+    abandon_reason: null,
+    created_at: '2026-09-25T10:00:00Z',
+    ready_at: '2026-09-25T10:00:30Z',
+    started_at: null,
+    submitted_at: null,
+    evaluated_at: null,
+    abandoned_at: null,
+    result: null,
+    ...overrides,
+  };
+}
+
+export function verificationChallenge(overrides: Partial<VerificationChallenge> = {}): VerificationChallenge {
+  return {
+    session_id: SESSION,
+    item_id: '88888888-8888-4888-8888-888888888888',
+    skill_id: SKILL,
+    canonical_name: 'Choosing LEFT JOIN',
+    skill_description: 'Choose LEFT JOIN when unmatched rows must be kept.',
+    assessment_type: 'mcq',
+    prompt: 'Which join lists every member, including members without loans?',
+    choices: [
+      { key: 'A', text: 'INNER JOIN' },
+      { key: 'B', text: 'LEFT JOIN from members' },
+    ],
+    multiple_select: false,
+    estimated_minutes: 2,
+    max_response_chars: 4000,
+    ...overrides,
+  };
+}
+
+export function verificationQueue(overrides: Partial<VerificationsResponse> = {}): VerificationsResponse {
+  return {
+    planner_version: 'verification-planner/p6-v1',
+    budget: { day: '2026-09-25', timezone: 'UTC', daily_limit: 2, planned_today: 1, remaining_today: 1 },
+    preparing: [],
+    ready: [],
+    in_progress: [],
+    pending: [],
+    completed: [],
+    closed: [],
     ...overrides,
   };
 }

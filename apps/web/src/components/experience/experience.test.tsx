@@ -36,11 +36,12 @@ describe('state badges and counts', () => {
     expect(html(<DebtBadge band="MODERATE" />)).toContain('Moderate reliance signal');
   });
 
-  it('counts states with UNKNOWN first and marks the future P6 states', () => {
+  it('counts states with UNKNOWN first and marks the states that need a SkillMirror check', () => {
     const markup = html(<StateCountTiles counts={{ ...emptyCounts(), UNKNOWN: 2, DEMONSTRATED: 1 }} />);
     expect(markup.indexOf('data-state="UNKNOWN"')).toBeLessThan(markup.indexOf('data-state="DEMONSTRATED"'));
     expect(markup).toContain('Not enough activity yet');
-    expect(count(markup, 'After SkillMirror checks (coming next)')).toBe(2);
+    expect(count(markup, 'After a SkillMirror check')).toBe(2);
+    expect(markup).not.toContain('coming next');
   });
 });
 
@@ -186,6 +187,10 @@ describe('recommendations, selector, forms and page states', () => {
     const verify = html(<RecommendationCard rec={recommendation({ type: 'VERIFY', reason_code: 'REPEATED_DELEGATION_UNVERIFIED', debt_band: 'MODERATE' })} />);
     expect(verify).toContain('Show you can do it on your own');
     expect(verify).toContain('href="/skills/11111111-1111-4111-8111-111111111111"');
+    // P6: a VERIFY recommendation leads to its check.
+    expect(verify).toContain('href="/verifications"');
+    expect(verify).toContain('Start the check');
+    expect(verify).not.toContain('later update');
     const prerequisite = html(
       <RecommendationCard
         rec={recommendation({ type: 'PREREQUISITE', reason_code: 'PREREQUISITE_GAP', mastery_state: 'DEVELOPING', related_skill_id: OTHER_SKILL, related_skill_name: 'Variables' })}

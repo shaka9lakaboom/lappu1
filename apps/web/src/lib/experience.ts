@@ -72,7 +72,7 @@ export const MASTERY: Record<MasteryState, StatePresentation> = {
   NEEDS_REVERIFICATION: {
     label: 'Needs a fresh check',
     tone: 'amber',
-    headline: 'Your earlier verification is getting old; a short fresh check would confirm it.',
+    headline: 'Your earlier SkillMirror check needs refreshing; a short fresh check would confirm the skill.',
   },
 };
 
@@ -97,8 +97,11 @@ const EXPLANATION_DETAILS: Record<string, string> = {
   NEEDS_INDEPENDENT_APPLICATION:
     'Your results are strong; one successful independent application would complete the picture.',
   INDEPENDENT_EVIDENCE_SUPPORTS: 'You applied this skill yourself, successfully, more than once.',
-  RECENT_VERIFICATION: 'You passed a recent SkillMirror check.',
+  RECENT_VERIFICATION: 'You passed a recent SkillMirror check, and your independent evidence supports it.',
+  VERIFICATION_HELD:
+    'You passed a recent SkillMirror check. A later result did not go as well; it is recorded, but one result does not undo the check.',
   VERIFICATION_STALE: 'Your last check was a while ago.',
+  VERIFICATION_CONTRADICTED: 'Several recent results disagree with your earlier check, so a fresh check is suggested.',
 };
 
 export function explanationDetail(code: string): string {
@@ -110,6 +113,9 @@ export const GATE_LABELS: Record<string, string> = {
   STRONG_RESULTS: 'Mostly successful results',
   SUSTAINED_EVIDENCE: 'Evidence from several independent attempts',
   INDEPENDENT_APPLICATION: 'At least one successful independent application',
+  RECENT_CHECK_PASSED: 'A recent SkillMirror check passed',
+  VERIFIED_RESULTS: 'Consistently successful results (verified level)',
+  VERIFIED_EVIDENCE: 'Enough independent evidence for verified (including the check)',
 };
 
 // --- AI Assistance Debt ---------------------------------------------------------------------------
@@ -176,10 +182,15 @@ export function recommendationText(rec: Pick<Recommendation, 'type' | 'reason_co
     case 'VERIFY':
       return {
         title: 'Show you can do it on your own',
-        body: 'The AI has repeatedly done this for you and there is no independent evidence yet. Try one small task without AI help; your own captured work counts as evidence. Short SkillMirror checks arrive in a later update.',
+        body: 'The AI has repeatedly done this for you and there is no independent evidence yet. A short SkillMirror check, done without AI help, adds that evidence.',
       };
     case 'REVERIFY':
-      return { title: 'Refresh your check', body: 'Your verification is getting old. A short fresh check will confirm the skill.' };
+      return rec.reason_code === 'VERIFICATION_CONTRADICTED'
+        ? {
+            title: 'Refresh your check',
+            body: 'Several recent results disagree with your earlier check. A short fresh check will show where you stand.',
+          }
+        : { title: 'Refresh your check', body: 'Your last check was a while ago. A short fresh check will confirm the skill.' };
     case 'PREREQUISITE':
       return {
         title: `Strengthen ${rec.related_skill_name ?? 'a prerequisite'} first`,
