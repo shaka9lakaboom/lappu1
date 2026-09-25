@@ -81,3 +81,13 @@ def test_the_replay_set_passes_from_the_recording() -> None:
     assert data["verdict"] == "PASS", (data["failing"], data["hard_gates"])
     assert data["cases"] == 72 and data["blocked"] == 0
     assert data["provider_requests"] == 0  # a replay never reaches a network
+    # H16: no soft metric more than 5 points below the model's committed baseline.
+    assert gate.regressions(data["metrics"]) == []
+
+
+def test_the_committed_recording_fits_this_code() -> None:
+    """H16: an engine prompt version changed without a new live recording, a hand-edited
+    recording, or a changed calibration target fails CI (a new live run + baseline fixes it)."""
+    if not (gate.BASELINES / f"{gate.LIVE_MODEL}.json").exists():
+        pytest.skip("no baseline committed yet")
+    assert gate.baseline_problems() == []

@@ -1357,6 +1357,7 @@ def run_gate(
     only: set[str] | None = None,
     keep: bool = False,
     allow_foreign_registry: bool = False,
+    fresh: bool = False,
 ) -> Report:
     import gate_db
 
@@ -1441,8 +1442,12 @@ def run_gate(
         pool = build_pool(database_url)
     run_recorder = DbModelRunRecorder(pool) if pool else InMemoryRunRecorder()
     cache = InMemoryResultCache(4096)
+    # Live runs reuse the durable cache (unchanged reruns cost 0), except `fresh`: every response
+    # then passes through the recorder (re-recording what a local replay found missing).
     result_cache = (
-        TieredResultCache(cache, DbResultCache(pool)) if (pool and mode == "live") else cache
+        TieredResultCache(cache, DbResultCache(pool))
+        if (pool and mode == "live" and not fresh)
+        else cache
     )
     gateway = ModelGateway(
         provider,
@@ -1586,14 +1591,101 @@ def planned_requests(cases: list[dict[str, Any]]) -> tuple[int, int]:
     return sum(_estimate(c) for c in cases), sum(_estimate(c, worst=True) for c in cases)
 
 
-def record_run(report: Report, database_url: str) -> str:
-    """Insert the run into benchmark_runs (migration 0009). Returns its id."""
+# --- regression baseline (H16) --------------------------------------------------------------------
+
+# A soft metric may not fall more than this below the model's committed baseline (replay / live).
+BASELINE_TOLERANCE = 0.05
+
+
+def recording_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def write_baseline(report: dict[str, Any], recording: Path, out_dir: Path = BASELINES) -> Path:
+    """The committed baseline of a model: written only from a complete, passing live run."""
+    live = [c for c in load_cases() if c.get("live")]
+    if report.get("mode") != "live" or report.get("verdict") != "PASS":
+        raise SystemExit("a baseline needs a PASSING live run")
+    if report.get("cases") != len(live) or report.get("blocked"):
+        raise SystemExit(f"a baseline needs all {len(live)} live cases, none blocked")
+    if report.get("prompt_versions") != PROMPT_VERSIONS:
+        raise SystemExit("the report was produced with other prompt versions than this code")
+    baseline = {
+        "set": SET_NAME,
+        "version": SET_VERSION,
+        "model": report["model"],
+        "prompt_versions": PROMPT_VERSIONS,
+        "policy_hash": report["policy_hash"],
+        "code_sha": report["code_sha"],
+        "recorded_at": report["finished_at"],
+        "recording": {
+            "path": recording.relative_to(BENCHMARK).as_posix(),
+            "sha256": recording_sha256(recording),
+            "entries": sum(
+                1 for line in recording.read_text(encoding="utf-8").splitlines() if line
+            ),
+        },
+        "cases": report["cases"],
+        "passed": report["passed"],
+        "provider_requests": report["provider_requests"],
+        "hard_gates": {k: v["value"] for k, v in report["hard_gates"].items()},
+        "metrics": {k: v["value"] for k, v in report["metrics"].items()},
+        "targets": TARGETS,
+    }
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / f"{report['model']}.json"
+    path.write_text(json.dumps(baseline, indent=2) + "\n", encoding="utf-8", newline="\n")
+    return path
+
+
+def baseline_problems(model: str = LIVE_MODEL) -> list[str]:
+    """Why the committed recording / baseline of `model` no longer fits this code (empty = fits)."""
+    path = BASELINES / f"{model}.json"
+    if not path.exists():
+        return [f"no baseline for {model}"]
+    baseline = json.loads(path.read_text(encoding="utf-8"))
+    problems = []
+    changed = {
+        k: (baseline["prompt_versions"].get(k), v)
+        for k, v in PROMPT_VERSIONS.items()
+        if baseline["prompt_versions"].get(k) != v
+    }
+    if changed:
+        problems.append(f"prompt versions changed without a new live recording: {changed}")
+    recording = BENCHMARK / baseline["recording"]["path"]
+    if not recording.exists():
+        problems.append(f"the recording {baseline['recording']['path']} is missing")
+    elif recording_sha256(recording) != baseline["recording"]["sha256"]:
+        problems.append("the recording differs from the one the baseline was written for")
+    if baseline.get("targets") != TARGETS:
+        problems.append("a calibration target changed: that needs an ADR note and a new baseline")
+    return problems
+
+
+def regressions(metrics: dict[str, Any], model: str = LIVE_MODEL) -> list[str]:
+    """Soft metrics more than BASELINE_TOLERANCE below the model's baseline."""
+    path = BASELINES / f"{model}.json"
+    if not path.exists():
+        return []
+    baseline = json.loads(path.read_text(encoding="utf-8"))["metrics"]
+    out = []
+    for name, value in baseline.items():
+        now = metrics.get(name, {}).get("value") if isinstance(metrics.get(name), dict) else None
+        if value is not None and now is not None and now < value - BASELINE_TOLERANCE:
+            out.append(f"{name} {now} < baseline {value} - {BASELINE_TOLERANCE}")
+    return out
+
+
+def record_run(report: Report | dict[str, Any], database_url: str) -> str:
+    """Insert a run (a Report, or its saved JSON) into benchmark_runs (migration 0009). Returns
+    its id. The row holds counts, gates, metrics and case ids only: no case text, no output."""
     import psycopg
     from psycopg.types.json import Jsonb
 
-    data = report.as_json()
+    data = report.as_json() if isinstance(report, Report) else report
     counts = Counter(
-        "blocked" if r.blocked else ("passed" if r.passed else "failed") for r in report.runs
+        "blocked" if r["blocked"] else ("passed" if r["passed"] else "failed")
+        for r in data["results"]
     )
     with psycopg.connect(database_url, prepare_threshold=None) as conn:
         (run_id,) = conn.execute(
@@ -1607,24 +1699,24 @@ def record_run(report: Report, database_url: str) -> str:
             returning id
             """,
             (
-                SET_NAME,
-                SET_VERSION,
-                report.mode.upper(),
-                report.provider,
-                report.model,
-                None if report.mode == "deterministic" else "architecture-default",
-                Jsonb(PROMPT_VERSIONS),
-                report.policy_hash,
-                report.code_sha,
-                len(report.runs),
+                data["set"],
+                data["version"],
+                data["mode"].upper(),
+                data["provider"],
+                data["model"],
+                None if data["mode"] == "deterministic" else "architecture-default",
+                Jsonb(data["prompt_versions"]),
+                data["policy_hash"],
+                data["code_sha"],
+                len(data["results"]),
                 counts["passed"],
                 counts["failed"],
                 counts["blocked"],
                 Jsonb(data["hard_gates"]),
                 Jsonb(data["metrics"]),
                 data["verdict"],
-                report.provider_requests,
-                report.embedding_requests,
+                data["provider_requests"],
+                data["embedding_requests"],
                 Jsonb(
                     {
                         "families": data["families"],
@@ -1632,8 +1724,8 @@ def record_run(report: Report, database_url: str) -> str:
                         "blocked": data["blocked_ids"],
                     }
                 ),
-                report.started_at,
-                report.finished_at,
+                data["started_at"],
+                data["finished_at"],
             ),
         ).fetchone()
     return str(run_id)
@@ -1641,7 +1733,12 @@ def record_run(report: Report, database_url: str) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("mode", choices=("validate", "deterministic", "replay", "live"))
+    parser.add_argument(
+        "mode", choices=("validate", "deterministic", "replay", "live", "baseline", "record")
+    )
+    parser.add_argument(
+        "--from-report", type=Path, help="baseline / record: the saved JSON report of a run"
+    )
     parser.add_argument(
         "--database-url",
         default=os.environ.get("BENCHMARK_DATABASE_URL") or os.environ.get("TEST_DATABASE_URL"),
@@ -1652,11 +1749,28 @@ def main() -> int:
     parser.add_argument("--only", help="comma-separated case ids or families")
     parser.add_argument("--keep", action="store_true", help="keep the fixtures and learners")
     parser.add_argument("--allow-foreign-registry", action="store_true")
+    parser.add_argument(
+        "--fresh", action="store_true", help="live: no durable cache (every response recorded)"
+    )
     parser.add_argument("--out", type=Path)
     parser.add_argument(
         "--record-to", action="append", default=[], help="a database URL for benchmark_runs"
     )
     args = parser.parse_args()
+    if args.mode == "baseline":
+        if not args.from_report:
+            raise SystemExit("baseline needs --from-report <live report JSON>")
+        report = json.loads(args.from_report.read_text(encoding="utf-8"))
+        recording = args.recording or RECORDINGS / f"{report['model']}.jsonl"
+        print("baseline:", write_baseline(report, recording))
+        return 0
+    if args.mode == "record":
+        if not (args.from_report and args.record_to):
+            raise SystemExit("record needs --from-report <report JSON> and --record-to <database>")
+        data = json.loads(args.from_report.read_text(encoding="utf-8"))
+        for url in args.record_to:
+            print("benchmark_runs:", record_run(data, url))
+        return 0
     if args.mode == "validate":
         cases = load_cases()
         problems = validate_cases(cases)
@@ -1674,6 +1788,7 @@ def main() -> int:
         only=set(args.only.split(",")) if args.only else None,
         keep=args.keep,
         allow_foreign_registry=args.allow_foreign_registry,
+        fresh=args.fresh,
     )
     data = report.as_json()
     for r in report.runs:
