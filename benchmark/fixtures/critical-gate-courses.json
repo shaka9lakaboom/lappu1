@@ -1,0 +1,894 @@
+{
+  "version": "critical-gate-courses/v1",
+  "note": "Frozen, hand-reviewed benchmark course graphs. Seeded into a LOCAL or CI database only (never hosted: they would enter the shared registry that real learners' retrieval uses). Node ids are uuid5(NAMESPACE_URL, 'skillmirror-critical-gate:' + key).",
+  "courses": [
+    {
+      "key": "python",
+      "name": "Introduction to Python Programming",
+      "subject": "Computer Science",
+      "level": "Beginner",
+      "topics": [
+        {
+          "key": "py-basics",
+          "name": "Python basics",
+          "description": "Values, variables and simple data types in Python."
+        },
+        {
+          "key": "py-control",
+          "name": "Python control flow",
+          "description": "Conditions and loops that control the order of execution."
+        },
+        {
+          "key": "py-functions-topic",
+          "name": "Python functions and errors",
+          "description": "Defining functions, returning values and handling errors."
+        },
+        {
+          "key": "py-data",
+          "name": "Python data structures",
+          "description": "Lists, dictionaries and comprehensions."
+        }
+      ],
+      "skills": [
+        {
+          "key": "py-variables",
+          "name": "Assigning variables and data types",
+          "topic": "py-basics",
+          "band": 1,
+          "importance": 0.6,
+          "description": "Create variables, assign values and recognise int, float, str and bool types.",
+          "aliases": [
+            "variable assignment"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ]
+        },
+        {
+          "key": "py-conditionals",
+          "name": "Writing if-elif-else conditions",
+          "topic": "py-control",
+          "band": 1,
+          "importance": 0.7,
+          "description": "Branch with if, elif and else on boolean conditions, including comparisons and the modulo operator.",
+          "aliases": [
+            "if statement",
+            "conditional logic"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ],
+          "prerequisites": [
+            "py-variables"
+          ]
+        },
+        {
+          "key": "py-for-loops",
+          "name": "Writing for loops over sequences",
+          "topic": "py-control",
+          "band": 2,
+          "importance": 0.8,
+          "description": "Iterate over lists, strings and ranges with for loops.",
+          "aliases": [
+            "for loop",
+            "iterating over a list"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ],
+          "prerequisites": [
+            "py-list-indexing"
+          ]
+        },
+        {
+          "key": "py-enumerate",
+          "name": "Iterating with enumerate",
+          "kind": "SUBSKILL",
+          "parent": "py-for-loops",
+          "topic": "py-control",
+          "band": 2,
+          "importance": 0.5,
+          "description": "Use enumerate in a for loop to get each item together with its index.",
+          "aliases": [
+            "enumerate",
+            "loop index"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ],
+          "prerequisites": []
+        },
+        {
+          "key": "py-while-loops",
+          "name": "Writing while loops",
+          "topic": "py-control",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Repeat work while a condition holds and make sure the loop terminates.",
+          "aliases": [
+            "while loop"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ],
+          "prerequisites": [
+            "py-conditionals"
+          ]
+        },
+        {
+          "key": "py-list-indexing",
+          "name": "Creating and indexing lists",
+          "topic": "py-data",
+          "band": 1,
+          "importance": 0.7,
+          "description": "Create lists, read and update elements by index, and slice them.",
+          "aliases": [
+            "list index",
+            "list slicing"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ],
+          "prerequisites": [
+            "py-variables"
+          ]
+        },
+        {
+          "key": "py-comprehensions",
+          "name": "Using list comprehensions",
+          "topic": "py-data",
+          "band": 3,
+          "importance": 0.6,
+          "description": "Build lists with comprehension syntax, with an optional if filter.",
+          "aliases": [
+            "list comprehension"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ],
+          "prerequisites": [
+            "py-for-loops"
+          ]
+        },
+        {
+          "key": "py-dicts",
+          "name": "Working with dictionaries",
+          "topic": "py-data",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Store key-value pairs, look up, update and iterate over dictionaries.",
+          "aliases": [
+            "dictionary",
+            "dict"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ]
+        },
+        {
+          "key": "py-functions",
+          "name": "Defining functions with parameters",
+          "topic": "py-functions-topic",
+          "band": 2,
+          "importance": 0.8,
+          "description": "Define functions with def, pass arguments and use default parameter values.",
+          "aliases": [
+            "def function",
+            "function parameters"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code"
+          ]
+        },
+        {
+          "key": "py-return-values",
+          "name": "Returning values from functions",
+          "topic": "py-functions-topic",
+          "band": 2,
+          "importance": 0.7,
+          "description": "Return results with return, and understand that a function without return gives None.",
+          "aliases": [
+            "return statement"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code",
+            "short_response"
+          ],
+          "prerequisites": [
+            "py-functions"
+          ]
+        },
+        {
+          "key": "py-exceptions",
+          "name": "Handling exceptions with try-except",
+          "topic": "py-functions-topic",
+          "band": 3,
+          "importance": 0.8,
+          "description": "Catch and handle runtime errors such as ValueError with try, except and finally.",
+          "aliases": [
+            "try except",
+            "exception handling"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code",
+            "short_response"
+          ]
+        },
+        {
+          "key": "py-recursion",
+          "name": "Writing recursive functions",
+          "topic": "py-functions-topic",
+          "band": 4,
+          "importance": 0.5,
+          "description": "Solve problems with functions that call themselves, with a correct base case.",
+          "aliases": [
+            "recursion"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code",
+            "reasoning"
+          ],
+          "prerequisites": [
+            "py-functions"
+          ]
+        },
+        {
+          "key": "py-binary-search",
+          "name": "Implementing binary search",
+          "topic": "py-control",
+          "band": 3,
+          "importance": 0.5,
+          "description": "Search a sorted list by repeatedly halving the search interval.",
+          "aliases": [
+            "binary search"
+          ],
+          "assessment_types": [
+            "mcq",
+            "code",
+            "reasoning"
+          ],
+          "prerequisites": [
+            "py-while-loops",
+            "py-list-indexing"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "sql",
+      "name": "Relational Databases and SQL",
+      "subject": "Databases",
+      "level": "Intermediate",
+      "topics": [
+        {
+          "key": "sql-queries",
+          "name": "SQL queries",
+          "description": "Selecting, filtering and sorting rows."
+        },
+        {
+          "key": "sql-combining",
+          "name": "Combining tables",
+          "description": "Joins and subqueries across related tables."
+        },
+        {
+          "key": "sql-summaries",
+          "name": "Summarising data",
+          "description": "Aggregation and grouping."
+        }
+      ],
+      "skills": [
+        {
+          "key": "sql-select",
+          "name": "Writing SELECT queries with WHERE filters",
+          "topic": "sql-queries",
+          "band": 1,
+          "importance": 0.8,
+          "description": "Select columns from a table and filter rows with WHERE conditions.",
+          "aliases": [
+            "select statement",
+            "where clause"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql"
+          ]
+        },
+        {
+          "key": "sql-order-limit",
+          "name": "Sorting and limiting query results",
+          "topic": "sql-queries",
+          "band": 1,
+          "importance": 0.5,
+          "description": "Order rows with ORDER BY and restrict them with LIMIT.",
+          "aliases": [
+            "order by"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql"
+          ],
+          "prerequisites": [
+            "sql-select"
+          ]
+        },
+        {
+          "key": "sql-null",
+          "name": "Handling NULL values in queries",
+          "topic": "sql-queries",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Test for missing values with IS NULL and COALESCE, and understand NULL in comparisons.",
+          "aliases": [
+            "null handling",
+            "coalesce"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql"
+          ],
+          "prerequisites": [
+            "sql-select"
+          ]
+        },
+        {
+          "key": "sql-inner-join",
+          "name": "Joining tables with INNER JOIN",
+          "topic": "sql-combining",
+          "band": 2,
+          "importance": 0.8,
+          "description": "Combine rows of two tables on a matching key with INNER JOIN and the ON clause.",
+          "aliases": [
+            "inner join",
+            "join syntax"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql"
+          ],
+          "prerequisites": [
+            "sql-select"
+          ]
+        },
+        {
+          "key": "sql-left-join",
+          "name": "Choosing LEFT JOIN to keep unmatched rows",
+          "topic": "sql-combining",
+          "band": 3,
+          "importance": 0.8,
+          "description": "Use LEFT JOIN when every row of the left table must appear, with NULLs where nothing matches.",
+          "aliases": [
+            "left outer join",
+            "left join"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql",
+            "reasoning"
+          ],
+          "prerequisites": [
+            "sql-inner-join"
+          ]
+        },
+        {
+          "key": "sql-group-by",
+          "name": "Aggregating rows with GROUP BY",
+          "topic": "sql-summaries",
+          "band": 3,
+          "importance": 0.7,
+          "description": "Summarise rows per group with GROUP BY and aggregate functions such as COUNT and SUM.",
+          "aliases": [
+            "group by",
+            "aggregate functions"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql",
+            "numeric"
+          ],
+          "prerequisites": [
+            "sql-select"
+          ]
+        },
+        {
+          "key": "sql-subqueries",
+          "name": "Writing subqueries",
+          "topic": "sql-combining",
+          "band": 4,
+          "importance": 0.5,
+          "description": "Nest a SELECT inside another query to filter or compute values.",
+          "aliases": [
+            "nested query",
+            "subquery"
+          ],
+          "assessment_types": [
+            "mcq",
+            "sql"
+          ],
+          "prerequisites": [
+            "sql-select"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "bizmath",
+      "name": "Business Mathematics",
+      "subject": "Mathematics",
+      "level": "Beginner",
+      "topics": [
+        {
+          "key": "bm-percent",
+          "name": "Percentages and pricing",
+          "description": "Percentages, markups and margins."
+        },
+        {
+          "key": "bm-finance",
+          "name": "Interest and break-even",
+          "description": "Interest calculations and break-even analysis."
+        }
+      ],
+      "skills": [
+        {
+          "key": "bm-percentages",
+          "name": "Calculating percentages and percentage change",
+          "topic": "bm-percent",
+          "band": 1,
+          "importance": 0.8,
+          "description": "Compute a percentage of a value and the percentage increase or decrease between two values.",
+          "aliases": [
+            "percentage change",
+            "percent increase"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ]
+        },
+        {
+          "key": "bm-markup-margin",
+          "name": "Distinguishing markup and profit margin",
+          "topic": "bm-percent",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Compute markup on cost and margin on selling price and tell them apart.",
+          "aliases": [
+            "profit margin",
+            "markup"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ],
+          "prerequisites": [
+            "bm-percentages"
+          ]
+        },
+        {
+          "key": "bm-simple-interest",
+          "name": "Computing simple interest",
+          "topic": "bm-finance",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Compute interest as principal times rate times time.",
+          "aliases": [
+            "simple interest"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ],
+          "prerequisites": [
+            "bm-percentages"
+          ]
+        },
+        {
+          "key": "bm-compound-interest",
+          "name": "Computing compound interest",
+          "topic": "bm-finance",
+          "band": 3,
+          "importance": 0.8,
+          "description": "Compute the future value of an amount with interest compounded per period.",
+          "aliases": [
+            "compound interest formula",
+            "future value"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ],
+          "prerequisites": [
+            "bm-simple-interest"
+          ]
+        },
+        {
+          "key": "bm-break-even",
+          "name": "Performing break-even analysis",
+          "topic": "bm-finance",
+          "band": 3,
+          "importance": 0.6,
+          "description": "Find the sales volume where revenue covers fixed and variable costs.",
+          "aliases": [
+            "break even point"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ],
+          "prerequisites": [
+            "bm-percentages"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "stats",
+      "name": "Introduction to Statistics",
+      "subject": "Statistics",
+      "level": "Beginner",
+      "topics": [
+        {
+          "key": "st-descriptive",
+          "name": "Descriptive statistics",
+          "description": "Summaries of the centre and spread of data."
+        },
+        {
+          "key": "st-inference",
+          "name": "Statistical inference and models",
+          "description": "Hypothesis tests, p-values and regression."
+        }
+      ],
+      "skills": [
+        {
+          "key": "st-mean-median",
+          "name": "Computing mean and median",
+          "topic": "st-descriptive",
+          "band": 1,
+          "importance": 0.7,
+          "description": "Compute and compare the mean and the median of a data set.",
+          "aliases": [
+            "average",
+            "median"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ]
+        },
+        {
+          "key": "st-std-dev",
+          "name": "Computing and interpreting standard deviation",
+          "topic": "st-descriptive",
+          "band": 2,
+          "importance": 0.7,
+          "description": "Compute the standard deviation and explain what it says about spread.",
+          "aliases": [
+            "standard deviation",
+            "variance"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric",
+            "short_response"
+          ],
+          "prerequisites": [
+            "st-mean-median"
+          ]
+        },
+        {
+          "key": "st-correlation",
+          "name": "Interpreting correlation coefficients",
+          "topic": "st-inference",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Interpret the sign and strength of a correlation coefficient and why correlation is not causation.",
+          "aliases": [
+            "correlation"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ]
+        },
+        {
+          "key": "st-hypothesis-test",
+          "name": "Setting up a hypothesis test",
+          "topic": "st-inference",
+          "band": 3,
+          "importance": 0.7,
+          "description": "State null and alternative hypotheses and choose a significance level.",
+          "aliases": [
+            "null hypothesis",
+            "hypothesis testing"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ],
+          "prerequisites": [
+            "st-std-dev"
+          ]
+        },
+        {
+          "key": "st-p-value",
+          "name": "Interpreting p-values",
+          "topic": "st-inference",
+          "band": 3,
+          "importance": 0.8,
+          "description": "Explain what a p-value measures and decide whether to reject the null hypothesis.",
+          "aliases": [
+            "p value",
+            "statistical significance"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response",
+            "reasoning"
+          ],
+          "prerequisites": [
+            "st-hypothesis-test"
+          ]
+        },
+        {
+          "key": "st-linear-regression",
+          "name": "Fitting and interpreting a linear regression",
+          "topic": "st-inference",
+          "band": 3,
+          "importance": 0.7,
+          "description": "Fit a least-squares line and interpret its slope and intercept.",
+          "aliases": [
+            "regression line",
+            "least squares"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric",
+            "short_response"
+          ],
+          "prerequisites": [
+            "st-correlation"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "physics",
+      "name": "Introductory Physics: Mechanics",
+      "subject": "Physics",
+      "level": "Beginner",
+      "topics": [
+        {
+          "key": "ph-motion",
+          "name": "Motion",
+          "description": "Kinematics of objects moving in a line."
+        },
+        {
+          "key": "ph-forces",
+          "name": "Forces and energy",
+          "description": "Newton's laws and energy conservation."
+        },
+        {
+          "key": "ph-tools",
+          "name": "Mathematical tools for physics",
+          "description": "Units and algebra used in physics problems."
+        }
+      ],
+      "skills": [
+        {
+          "key": "ph-kinematics",
+          "name": "Solving constant-acceleration kinematics problems",
+          "topic": "ph-motion",
+          "band": 2,
+          "importance": 0.8,
+          "description": "Use the constant-acceleration equations to find distance, velocity or time.",
+          "aliases": [
+            "suvat equations",
+            "kinematic equations"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ],
+          "prerequisites": [
+            "ph-rearrange"
+          ]
+        },
+        {
+          "key": "ph-newton-second",
+          "name": "Applying Newton's second law",
+          "topic": "ph-forces",
+          "band": 2,
+          "importance": 0.8,
+          "description": "Relate net force, mass and acceleration with F = ma.",
+          "aliases": [
+            "F = ma",
+            "newtons second law"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ],
+          "prerequisites": [
+            "ph-free-body"
+          ]
+        },
+        {
+          "key": "ph-free-body",
+          "name": "Drawing free-body diagrams",
+          "topic": "ph-forces",
+          "band": 2,
+          "importance": 0.6,
+          "description": "Identify and draw every force acting on an object.",
+          "aliases": [
+            "force diagram"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ]
+        },
+        {
+          "key": "ph-energy",
+          "name": "Applying conservation of energy",
+          "topic": "ph-forces",
+          "band": 3,
+          "importance": 0.7,
+          "description": "Convert between kinetic and potential energy in a closed system.",
+          "aliases": [
+            "energy conservation"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ]
+        },
+        {
+          "key": "ph-rearrange",
+          "name": "Rearranging formulas to solve for a variable",
+          "topic": "ph-tools",
+          "band": 1,
+          "importance": 0.6,
+          "description": "Rearrange an equation algebraically to isolate the unknown quantity.",
+          "aliases": [
+            "rearranging equations",
+            "solving for a variable"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ]
+        },
+        {
+          "key": "ph-units",
+          "name": "Converting units",
+          "topic": "ph-tools",
+          "band": 1,
+          "importance": 0.5,
+          "description": "Convert between units such as km/h and m/s.",
+          "aliases": [
+            "unit conversion"
+          ],
+          "assessment_types": [
+            "mcq",
+            "numeric"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "writing",
+      "name": "Academic Writing",
+      "subject": "Writing",
+      "level": "Intermediate",
+      "topics": [
+        {
+          "key": "wr-structure",
+          "name": "Essay structure",
+          "description": "Theses, paragraphs and argument."
+        },
+        {
+          "key": "wr-sources",
+          "name": "Working with sources",
+          "description": "Citation and paraphrase."
+        }
+      ],
+      "skills": [
+        {
+          "key": "wr-thesis",
+          "name": "Writing a clear thesis statement",
+          "topic": "wr-structure",
+          "band": 2,
+          "importance": 0.8,
+          "description": "State an arguable, specific main claim for an essay.",
+          "aliases": [
+            "thesis",
+            "thesis statement"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ]
+        },
+        {
+          "key": "wr-paragraph",
+          "name": "Structuring a paragraph with a topic sentence",
+          "topic": "wr-structure",
+          "band": 1,
+          "importance": 0.6,
+          "description": "Open a paragraph with a topic sentence and support it with evidence.",
+          "aliases": [
+            "topic sentence"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ]
+        },
+        {
+          "key": "wr-counterargument",
+          "name": "Addressing counterarguments",
+          "topic": "wr-structure",
+          "band": 3,
+          "importance": 0.6,
+          "description": "Present and rebut opposing views fairly.",
+          "aliases": [
+            "counterargument",
+            "rebuttal"
+          ],
+          "assessment_types": [
+            "short_response",
+            "reasoning"
+          ],
+          "prerequisites": [
+            "wr-thesis"
+          ]
+        },
+        {
+          "key": "wr-citation",
+          "name": "Citing sources in APA style",
+          "topic": "wr-sources",
+          "band": 2,
+          "importance": 0.7,
+          "description": "Format in-text citations and reference list entries in APA style.",
+          "aliases": [
+            "APA citation",
+            "reference list"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ]
+        },
+        {
+          "key": "wr-paraphrase",
+          "name": "Paraphrasing without plagiarism",
+          "topic": "wr-sources",
+          "band": 2,
+          "importance": 0.7,
+          "description": "Restate a source's idea in new words and structure, with a citation.",
+          "aliases": [
+            "paraphrasing"
+          ],
+          "assessment_types": [
+            "mcq",
+            "short_response"
+          ],
+          "prerequisites": [
+            "wr-citation"
+          ]
+        }
+      ]
+    }
+  ]
+}
