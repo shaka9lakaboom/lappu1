@@ -15,7 +15,6 @@ from psycopg.types.json import Jsonb
 from app.intelligence.contracts import RetrievalResult
 from app.intelligence.mapping.engine import (
     ADJUDICATION_PROMPT_VERSION,
-    MAPPER_VERSION,
     MAPPING_PROMPT_VERSION,
     MappingResult,
 )
@@ -25,7 +24,16 @@ from app.intelligence.retrieval.engine import QUERY_INPUT_VERSION
 from app.intelligence.retrieval.rerank import PROMPT_VERSION as RERANK_PROMPT_VERSION
 from app.intelligence.skill_graph.canonical import skill_key
 
+# Idempotency key of a unit's analysis. Shared by both execution modes (ADR 0004): which
+# calls produced a decision is recorded by its prompt versions and mapper version.
 ANALYSIS_VERSION = "p3a-v1"
+
+STAGED_PROMPT_VERSIONS = {
+    "query_embedding": QUERY_INPUT_VERSION,
+    "rerank": RERANK_PROMPT_VERSION,
+    "mapping": MAPPING_PROMPT_VERSION,
+    "adjudication": ADJUDICATION_PROMPT_VERSION,
+}
 
 
 @dataclass(frozen=True)
@@ -37,6 +45,8 @@ class SegmentAnalysis:
     reason_code: str
     retrieval: RetrievalResult | None = None
     mapping: MappingResult | None = None
+    # Prompt versions behind the mapping decision (default: the staged path).
+    prompt_versions: dict[str, str] | None = None
 
 
 def already_analyzed(conn: Connection, anchor_id: UUID, analysis_version: str) -> bool:
@@ -192,17 +202,10 @@ def persist_analysis(
                     retrieval.rerank_model_run_id,
                     mapping.mapping_run_id,
                     mapping.adjudication_run_id,
-                    Jsonb(
-                        {
-                            "query_embedding": QUERY_INPUT_VERSION,
-                            "rerank": RERANK_PROMPT_VERSION,
-                            "mapping": MAPPING_PROMPT_VERSION,
-                            "adjudication": ADJUDICATION_PROMPT_VERSION,
-                        }
-                    ),
+                    Jsonb(analysis.prompt_versions or STAGED_PROMPT_VERSIONS),
                     Jsonb(policy_snapshot),
                     candidate_id,
-                    MAPPER_VERSION,
+                    mapping.mapper_version,
                 ),
             ).fetchone()
             for skill in mapping.skills:
@@ -229,7 +232,7 @@ def persist_analysis(
                         skill.reason_code,
                         skill.status_reason,
                         skill.evidence_span,
-                        MAPPER_VERSION,
+                        mapping.mapper_version,
                     ),
                 )
     return True

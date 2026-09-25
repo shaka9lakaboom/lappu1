@@ -17,6 +17,13 @@ bootstrap job (graph READY) -> inspect skills + embeddings -> real retrieval que
 send a real learning turn through POST /v1/events/batch -> wait for processing ->
 print the provenance chain (segment -> decision -> mappings -> model_runs -> raw_messages).
 No model output is forced. No secret is printed or written.
+
+Provider-request budget (ADR 0004, combined turn analysis): a new course costs 1 graph
+request + 1-2 embedding requests; the learning turn 1 query embedding + 1 generation
+request (+1 adjudication only if a mapping lands in 0.65-0.79). The retrieval probe is an
+embedding only. `--rerank-probe` adds one staged rerank request. The script prints the
+day's budget first and the requests actually spent at the end; the gateway never
+touches the configured reserve.
 """
 
 import argparse
@@ -95,6 +102,11 @@ def main() -> int:
         "rerank is verified on the real turn only, to save free-tier quota",
     )
     parser.add_argument(
+        "--no-repeat",
+        action="store_true",
+        help="skip re-ingesting the identical turn (the cache check; 0 provider requests)",
+    )
+    parser.add_argument(
         "--resume-course",
         default=None,
         help="reuse an existing course (and its owner) from an earlier run",
@@ -108,8 +120,35 @@ def main() -> int:
     supabase_url = web["NEXT_PUBLIC_SUPABASE_URL"].rstrip("/")
     anon = web["NEXT_PUBLIC_SUPABASE_ANON_KEY"]
     pool = create_pool(settings.database_url.get_secret_value())
-    evidence: dict = {"started_at": datetime.now(UTC).isoformat(), "api": args.api}
+    started_at = datetime.now(UTC)
+    evidence: dict = {"started_at": started_at.isoformat(), "api": args.api}
     http = httpx.Client(timeout=30)
+
+    # Fails fast (ModelRunsSchemaError) if migration 0004 is missing on the target database.
+    gateway = build_gateway(settings, pool)
+    routing = gateway.routing
+    budget = [
+        {"model": b.model, "used": b.used, "limit": b.limit, "reserve": b.reserve,
+         "available": b.available}
+        for b in gateway.budget_status()
+    ]  # fmt: skip
+    print(
+        f"[0] model policy {routing.name}: default={routing.default_model} "
+        f"routine={routing.routine_model or routing.default_model} "
+        f"turn_analysis={settings.turn_analysis_mode}"
+    )
+    for b in budget:
+        print(
+            f"    budget {b['model']}: {b['used']}/{b['limit']} used today, reserve "
+            f"{b['reserve']}, {b['available']} available"
+        )
+    evidence["model_policy"] = {
+        "routing": routing.name,
+        "default_model": routing.default_model,
+        "routine_model": routing.routine_model,
+        "turn_analysis_mode": settings.turn_analysis_mode,
+        "budget_before": budget,
+    }
 
     health = http.get(f"{args.api}/health").json()
     print(f"[1] backend {health['service']} {health['version']} ({health['environment']})")
@@ -218,7 +257,6 @@ def main() -> int:
         "model_runs": [list(r) for r in bootstrap_runs],
     }
 
-    gateway = build_gateway(settings, pool)
     probe_ctx = RunContext(trace_id=f"acceptance:retrieval:{course_id}")
     with pool.connection() as conn:
         policy = load_policy(conn)
@@ -271,52 +309,54 @@ def main() -> int:
         "reranked_in_probe": bool(args.rerank_probe),
     }
 
-    conversation = f"acceptance-{uuid.uuid4().hex[:12]}"
-    user_ext, assistant_ext = f"u-{uuid.uuid4().hex[:12]}", f"a-{uuid.uuid4().hex[:12]}"
-    now = datetime.now(UTC).isoformat()
+    def ingest_turn() -> tuple[list[str], str]:
+        """The acceptance turn, in a new conversation each time (so an identical unit)."""
+        conversation = f"acceptance-{uuid.uuid4().hex[:12]}"
+        user_ext, assistant_ext = f"u-{uuid.uuid4().hex[:12]}", f"a-{uuid.uuid4().hex[:12]}"
+        now = datetime.now(UTC).isoformat()
 
-    def envelope(ext, parent, index, role, text):
-        return {
-            "event_id": str(uuid.uuid4()),
-            "schema_version": 1,
-            "learner_id": learner,
-            "source_provider": "chatgpt",
-            "source_method": "browser_extension",
-            "external_conversation_id": conversation,
-            "external_message_id": ext,
-            "external_parent_message_id": parent,
-            "message_index": index,
-            "role": role,
-            "content_text": text,
-            "content_format": "text",
-            "occurred_at": None,
-            "captured_at": now,
-            "provider_model": None,
-            "revision_index": 0,
-            "attachment_metadata": [],
-            "context_incomplete": False,
-            "active_course_id": course_id,
-            "content_hash": content_hash(text),
-            "client_event_id": f"chatgpt:{ext}:r0",
+        def envelope(ext, parent, index, role, text):
+            return {
+                "event_id": str(uuid.uuid4()),
+                "schema_version": 1,
+                "learner_id": learner,
+                "source_provider": "chatgpt",
+                "source_method": "browser_extension",
+                "external_conversation_id": conversation,
+                "external_message_id": ext,
+                "external_parent_message_id": parent,
+                "message_index": index,
+                "role": role,
+                "content_text": text,
+                "content_format": "text",
+                "occurred_at": None,
+                "captured_at": now,
+                "provider_model": None,
+                "revision_index": 0,
+                "attachment_metadata": [],
+                "context_incomplete": False,
+                "active_course_id": course_id,
+                "content_hash": content_hash(text),
+                "client_event_id": f"chatgpt:{ext}:r0",
+            }
+
+        batch = {
+            "client": {"extension_version": "0.2.0", "adapter_version": "chatgpt-1"},
+            "events": [
+                envelope(user_ext, None, 0, "user", USER_TURN),
+                envelope(assistant_ext, user_ext, 1, "assistant", ASSISTANT_TURN),
+            ],
         }
-
-    batch = {
-        "client": {"extension_version": "0.2.0", "adapter_version": "chatgpt-1"},
-        "events": [
-            envelope(user_ext, None, 0, "user", USER_TURN),
-            envelope(assistant_ext, user_ext, 1, "assistant", ASSISTANT_TURN),
-        ],
-    }
-    if token:
-        ingested = http.post(
-            f"{args.api}/v1/events/batch",
-            headers={"Authorization": f"Bearer {token}"},
-            json=batch,
-        )
-        ingested.raise_for_status()
-        raw_ids = [r["raw_message_id"] for r in ingested.json()["results"]]
-        via = "POST /v1/events/batch"
-    else:
+        if token:
+            ingested = http.post(
+                f"{args.api}/v1/events/batch",
+                headers={"Authorization": f"Bearer {token}"},
+                json=batch,
+            )
+            ingested.raise_for_status()
+            return [
+                r["raw_message_id"] for r in ingested.json()["results"]
+            ], "POST /v1/events/batch"
         with pool.connection() as conn:
             stored = ingest_batch(
                 conn,
@@ -324,21 +364,22 @@ def main() -> int:
                 [RawActivityEnvelope.model_validate(e) for e in batch["events"]],
                 EventBatchClientInfo.model_validate(batch["client"]),
             )
-        raw_ids = [str(r.raw_message_id) for r in stored]
-        via = "ingestion service"
-    print(f"[6] turn ingested via {via}: raw messages {raw_ids}")
+        return [str(r.raw_message_id) for r in stored], "ingestion service"
 
-    def jobs_done():
+    def jobs_done(ids):
         with pool.connection() as conn:
             rows = conn.execute(
                 "select entity_id::text, state::text, outcome, attempts, last_error "
                 "from public.processing_jobs where entity_id = any(%s::uuid[])",
-                (raw_ids,),
+                (ids,),
             ).fetchall()
         print(f"    jobs: {[(r[1], r[2]) for r in rows]}")
         return rows if rows and all(r[1] in ("COMPLETED", "FAILED") for r in rows) else None
 
-    jobs = wait("turn processing", jobs_done, args.timeout)
+    raw_ids, via = ingest_turn()
+    print(f"[6] turn ingested via {via}: raw messages {raw_ids}")
+
+    jobs = wait("turn processing", lambda: jobs_done(raw_ids), args.timeout)
     with pool.connection() as conn:
         segments = conn.execute(
             """select s.id::text, s.segment_index, s.route::text, s.route_reason, s.context::text,
@@ -354,7 +395,8 @@ def main() -> int:
             """select d.segment_id::text, d.outcome::text, d.abstain_reason,
                       jsonb_array_length(d.retrieval_candidates), cardinality(d.mapper_candidate_ids),
                       d.rerank_fallback, d.mapping_model_run_id::text, d.adjudication_model_run_id::text,
-                      d.prompt_versions, d.new_skill_candidate_id::text
+                      d.prompt_versions, d.new_skill_candidate_id::text, d.mapper_version,
+                      d.rerank_model_run_id::text
                  from public.mapping_decisions d
                  join public.activity_segments s on s.id = d.segment_id
                 where s.anchor_message_id = %s::uuid""",
@@ -376,9 +418,14 @@ def main() -> int:
             ).fetchall()
         ]
         runs = conn.execute(
-            "select trace_id, task_type, model, prompt_version, status::text, total_tokens, latency_ms "
-            "from public.model_runs where trace_id = any(%s) order by created_at",
+            "select trace_id, task_type, model, prompt_version, status::text, total_tokens, latency_ms, "
+            "cache_source_run_id::text from public.model_runs where trace_id = any(%s) order by created_at",
             ([f"job:{j}" for j in job_ids],),
+        ).fetchall()
+        spent = conn.execute(
+            "select model, count(*) from public.model_runs "
+            "where created_at >= %s and cache_source_run_id is null group by model order by model",
+            (started_at,),
         ).fetchall()
         evidence_tables = conn.execute(
             "select count(*) from pg_tables where schemaname = 'public' "
@@ -393,14 +440,19 @@ def main() -> int:
         print(f"      user={s[11]} assistant={s[12]} qualification_run={s[13]}")
     for d in decisions:
         print(
-            f"    decision {d[1]} abstain={d[2]} pool={d[3]} mapper_candidates={d[4]} fallback={d[5]}"
+            f"    decision {d[1]} abstain={d[2]} pool={d[3]} mapper_candidates={d[4]} fallback={d[5]} "
+            f"mapper={d[10]} one_call={d[11] == d[6]}"
         )
     for m in mappings:
         print(
             f"    mapping {m[0]}: {m[1]} ({m[2]}) first={m[3]:.2f} final={m[4]:.2f} span={m[7]!r}"
         )
     for r in runs:
-        print(f"    model_run {r[1]} {r[2]} {r[3]} {r[4]} tokens={r[5]} ms={r[6]}")
+        source = f"cache:{r[7]}" if r[7] else "provider"
+        print(f"    model_run {r[1]} {r[2]} {r[3]} {r[4]} tokens={r[5]} ms={r[6]} {source}")
+    print("[8] provider requests spent during this run (all processes, cache hits excluded)")
+    for model, count in spent:
+        print(f"    {model}: {count}")
     print(f"    evidence tables present: {evidence_tables} (P3A must create none)")
     evidence["turn"] = {
         "raw_message_ids": raw_ids,
@@ -411,6 +463,65 @@ def main() -> int:
         "model_runs": [list(r) for r in runs],
         "evidence_tables_present": evidence_tables,
     }
+    evidence["provider_requests_spent"] = {model: count for model, count in spent}
+
+    if not args.no_repeat:
+        # The identical turn again, handled by the same worker process: every model call
+        # must be served from the exact result cache, with zero provider requests.
+        repeat_started = datetime.now(UTC)
+        repeat_ids, _ = ingest_turn()
+        print(f"[9] identical turn re-ingested in a new conversation: raw messages {repeat_ids}")
+        wait("repeat processing", lambda: jobs_done(repeat_ids), args.timeout)
+        with pool.connection() as conn:
+            repeat_jobs = [
+                r[0]
+                for r in conn.execute(
+                    "select id::text from public.processing_jobs where entity_id = any(%s::uuid[])",
+                    (repeat_ids,),
+                ).fetchall()
+            ]
+            repeat_runs = conn.execute(
+                "select task_type, model, status::text, cache_source_run_id::text "
+                "from public.model_runs where trace_id = any(%s) order by created_at",
+                ([f"job:{j}" for j in repeat_jobs],),
+            ).fetchall()
+            repeat_requests = conn.execute(
+                "select count(*) from public.model_runs "
+                "where created_at >= %s and cache_source_run_id is null",
+                (repeat_started,),
+            ).fetchone()[0]
+            repeat_decisions = conn.execute(
+                "select d.outcome::text, d.abstain_reason from public.mapping_decisions d "
+                "join public.activity_segments s on s.id = d.segment_id "
+                "where s.anchor_message_id = %s::uuid",
+                (repeat_ids[0],),
+            ).fetchall()
+        for r in repeat_runs:
+            print(f"    model_run {r[0]} {r[1]} {r[2]} {'cache:' + r[3] if r[3] else 'PROVIDER'}")
+        print(
+            f"    provider requests during the repeat: {repeat_requests} (must be 0); "
+            f"decisions {repeat_decisions} (first run: {[(d[1], d[2]) for d in decisions]})"
+        )
+        evidence["repeat"] = {
+            "raw_message_ids": repeat_ids,
+            "model_runs": [list(r) for r in repeat_runs],
+            "provider_requests": repeat_requests,
+            "all_cache_hits": bool(repeat_runs) and all(r[3] for r in repeat_runs),
+            "decisions": [list(d) for d in repeat_decisions],
+        }
+
+    budget_after = gateway.budget_status()
+    print("[10] budget after the run")
+    for b in budget_after:
+        print(
+            f"    {b.model}: {b.used}/{b.limit} used today, reserve {b.reserve}, "
+            f"{b.available} available, reserve intact: {b.used + b.reserve <= b.limit}"
+        )
+    evidence["model_policy"]["budget_after"] = [
+        {"model": b.model, "used": b.used, "limit": b.limit, "reserve": b.reserve,
+         "available": b.available, "reserve_intact": b.used + b.reserve <= b.limit}
+        for b in budget_after
+    ]  # fmt: skip
     evidence["finished_at"] = datetime.now(UTC).isoformat()
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -9,6 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import AnyHttpUrl, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -18,6 +19,8 @@ from app import __version__
 AppEnvironment = Literal["development", "test", "staging", "production"]
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+# Free-tier quota observed on this project (GenerateRequestsPerDayPerProjectPerModel-FreeTier).
+DEFAULT_DAILY_REQUEST_LIMITS = "gemini-3.7-flash=20,gemini-3.8-flash=20"
 _ALLOWED_ORIGIN_SCHEMES = {"http", "https", "chrome-extension"}
 
 
@@ -60,10 +63,37 @@ class Settings(BaseSettings):
     # low | medium | high (gemini-3.7-flash does not accept "minimal").
     gemini_thinking_level: Literal["low", "medium", "high"] = "low"
     model_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
-    # Client-side request limits per minute (0 = off). The Gemini free tier allows as
-    # little as 5 generation requests per minute per project.
+    # Client-side request limits per minute and model (0 = off). The Gemini free tier
+    # allows as little as 5 generation requests per minute per project and model.
     gemini_generation_rpm: int = Field(default=0, ge=0, le=100000)
     gemini_embedding_rpm: int = Field(default=0, ge=0, le=100000)
+
+    # Hackathon free-tier routing policy (ADR 0004). Unset = the frozen architecture
+    # default: every generation task on GEMINI_GENERATION_MODEL. Set (e.g.
+    # gemini-3.5-flash-lite) = routine per-turn tasks use this model; course graph
+    # bootstrap and ambiguous-mapping adjudication stay on GEMINI_GENERATION_MODEL.
+    gemini_routine_model: str | None = Field(default=None, min_length=1, max_length=100)
+    # Thinking level for the routine model only (default: GEMINI_THINKING_LEVEL).
+    gemini_routine_thinking_level: Literal["minimal", "low", "medium", "high"] | None = None
+
+    # Quota-aware request budget (ADR 0004): provider requests per day and model,
+    # "model=limit,model=limit"; "off" disables it (blank keeps the default, the free-tier
+    # quota observed on this project). A model that is not listed is not budgeted (its
+    # 429s still defer jobs).
+    model_daily_request_limits: str = DEFAULT_DAILY_REQUEST_LIMITS
+    # Requests per model and day SkillMirror never spends on its own (safety reserve).
+    model_quota_reserve: int = Field(default=2, ge=0, le=100000)
+    # The provider's quota day (Gemini API: midnight Pacific).
+    model_quota_timezone: str = "America/Los_Angeles"
+
+    # Exact ModelGateway result cache (memory + durable model_runs tier).
+    model_result_cache: bool = True
+    model_result_cache_max_entries: int = Field(default=512, ge=0, le=100000)
+
+    # P3A turn execution: "combined" = local retrieval first, then ONE structured call for
+    # qualification + top-8 rerank + mapping (plus at most one adjudication); "staged" =
+    # the original qualification -> rerank -> mapping calls.
+    turn_analysis_mode: Literal["combined", "staged"] = "combined"
 
     # In-process durable worker loop (architecture §7.3). It starts with the API
     # when DATABASE_URL and GEMINI_API_KEY are set and APP_ENV is not "test".
@@ -107,6 +137,8 @@ class Settings(BaseSettings):
         "supabase_jwt_secret",
         "database_url",
         "gemini_api_key",
+        "gemini_routine_model",
+        "gemini_routine_thinking_level",
         mode="before",
     )
     @classmethod
@@ -115,6 +147,37 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @field_validator("model_daily_request_limits", mode="before")
+    @classmethod
+    def _blank_limits_keep_default(cls, value: object) -> object:
+        # A blank line copied from .env.example must not silently switch the budget off.
+        if isinstance(value, str) and not value.strip():
+            return DEFAULT_DAILY_REQUEST_LIMITS
+        return value
+
+    @field_validator("model_daily_request_limits")
+    @classmethod
+    def _validate_limits(cls, value: str) -> str:
+        from app.model_gateway.budget import parse_daily_limits
+
+        parse_daily_limits(value)
+        return value
+
+    @field_validator("model_quota_timezone")
+    @classmethod
+    def _validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown time zone {value!r}") from exc
+        return value
+
+    @property
+    def daily_request_limits(self) -> dict[str, int]:
+        from app.model_gateway.budget import parse_daily_limits
+
+        return parse_daily_limits(self.model_daily_request_limits)
 
     @model_validator(mode="after")
     def _require_deployed_config(self) -> "Settings":

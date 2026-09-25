@@ -70,6 +70,15 @@ class ModelRun:
     learner_id: UUID | None = None
     course_id: UUID | None = None
     processing_job_id: UUID | None = None
+    # Exact-request key; only on validated outputs and cache hits (never on failures).
+    cache_key: str | None = None
+    # Set on a cache hit: no provider request was made, this run's output was reused.
+    cache_source_run_id: UUID | None = None
+
+    @property
+    def provider_request(self) -> bool:
+        """True when this row stands for a real request to the provider."""
+        return self.cache_source_run_id is None
 
 
 @dataclass(frozen=True)
@@ -78,6 +87,8 @@ class StructuredResult[T: BaseModel]:
     run: ModelRun
     # Every call made for this result, including a failed first attempt before a repair.
     runs: tuple[ModelRun, ...] = field(default_factory=tuple)
+    # Served from the exact result cache: zero provider requests.
+    cache_hit: bool = False
 
 
 @dataclass(frozen=True)
@@ -200,3 +211,10 @@ class ModelCallError(ModelGatewayError):
 
 class ModelOutputInvalidError(ModelGatewayError):
     """Output failed validation twice (original + one repair). Callers abstain."""
+
+
+class ModelBudgetExhaustedError(ModelGatewayError):
+    """The model's daily request budget (provider quota minus the safety reserve) is spent.
+
+    Raised BEFORE any provider request. Always transient: the job waits for the quota
+    day to reset without spending an attempt."""

@@ -117,8 +117,9 @@ def unit_as_text(unit: ProcessingUnitText) -> str:
     return "\n\n".join(parts)
 
 
-def build_messages(unit: ProcessingUnitText, policy: QualificationPolicy) -> list[Message]:
-    user = (
+def unit_prompt(unit: ProcessingUnitText) -> str:
+    """The processing unit as prompt text (shared with the combined turn analysis)."""
+    return (
         f"Course context: {unit.course_context}\n"
         f"Attachments: {unit.attachment_note}\n"
         f"Context incomplete: {'yes' if unit.context_incomplete else 'no'}\n\n"
@@ -127,9 +128,12 @@ def build_messages(unit: ProcessingUnitText, policy: QualificationPolicy) -> lis
         f"Learner message:\n<<<\n{unit.user_text or '(not captured)'}\n>>>\n\n"
         f"Assistant response:\n<<<\n{unit.assistant_text or '(not captured)'}\n>>>"
     )
+
+
+def build_messages(unit: ProcessingUnitText, policy: QualificationPolicy) -> list[Message]:
     return [
         Message("system", SYSTEM_PROMPT.format(max_segments=policy.max_segments)),
-        Message("user", user),
+        Message("user", unit_prompt(unit)),
     ]
 
 

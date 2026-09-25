@@ -8,6 +8,19 @@ Structured output is parsed and validated strictly against a Pydantic model
 (plus an optional semantic validator). Invalid output gets exactly one repair
 attempt; if that is invalid too, `ModelOutputInvalidError` is raised and the
 caller abstains (§16 "Structured output invalid").
+
+Free-tier execution (ADR 0004):
+
+* Routing: the task type picks the model (`ModelRoutingPolicy`).
+* Exact result cache: an identical request (provider, model, task type, prompt
+  version, input hash) with a validated earlier output is served with ZERO
+  provider requests. The hit is still a `model_runs` row, linked to the run that
+  produced the output (`cache_source_run_id`). Failures are never cached.
+* Request budget: a provider request is only sent while the model's daily budget
+  (quota minus the safety reserve) has room; otherwise a transient
+  `ModelBudgetExhaustedError` is raised before anything is sent.
+* No retry loops: a provider error (429/503 included) is raised at once for the
+  worker to defer; the only second request is the single repair of invalid output.
 """
 
 import hashlib
@@ -18,13 +31,17 @@ import re
 import threading
 import time
 from collections import deque
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ValidationError
 
+from app.model_gateway.budget import BudgetStatus, RequestBudget
+from app.model_gateway.cache import CachedResult, CacheKey, ResultCache
 from app.model_gateway.recorder import ModelRunRecorder
+from app.model_gateway.routing import ModelRoutingPolicy
 from app.model_gateway.schema import provider_json_schema
 from app.model_gateway.types import (
     EMBEDDING_DIMENSION,
@@ -80,23 +97,42 @@ class ModelGateway:
         *,
         generation_model: str,
         embedding_model: str,
+        routine_model: str | None = None,
         default_timeout: float = 60.0,
         clock: Callable[[], float] = time.perf_counter,
-        generation_limiter: "RequestRateLimiter | None" = None,
-        embedding_limiter: "RequestRateLimiter | None" = None,
+        generation_rpm: int = 0,
+        embedding_rpm: int = 0,
+        result_cache: ResultCache | None = None,
+        embedding_cache: ResultCache | None = None,
+        budget: RequestBudget | None = None,
+        limiter_factory: Callable[[int], "RequestRateLimiter"] | None = None,
     ) -> None:
         self._provider = provider
         self._recorder = recorder
+        self.routing = ModelRoutingPolicy(generation_model, routine_model)
         self.generation_model = generation_model
         self.embedding_model = embedding_model
         self._default_timeout = default_timeout
         self._clock = clock
-        self._generation_limiter = generation_limiter or RequestRateLimiter(0)
-        self._embedding_limiter = embedding_limiter or RequestRateLimiter(0)
+        self._rpm = {"generation": generation_rpm, "embedding": embedding_rpm}
+        self._limiter_factory = limiter_factory or RequestRateLimiter
+        self._limiters: dict[str, RequestRateLimiter] = {}
+        self._limiters_lock = threading.Lock()
+        self._result_cache = result_cache
+        self._embedding_cache = embedding_cache
+        self.budget = budget
 
     @property
     def provider_name(self) -> str:
         return self._provider.name
+
+    def budget_status(self) -> list[BudgetStatus]:
+        """Today's request budget of every budgeted model this gateway can call."""
+        if self.budget is None:
+            return []
+        models = [*self.routing.generation_models, self.embedding_model]
+        statuses = (self.budget.status(self._provider.name, m) for m in dict.fromkeys(models))
+        return [s for s in statuses if s is not None]
 
     # ------------------------------------------------------------------
     # Structured generation
@@ -116,17 +152,29 @@ class ModelGateway:
         _require_versioned(task_type, prompt_version)
         if not messages:
             raise ValueError("messages must not be empty")
-        model = preferred_model or self.generation_model
+        model = preferred_model or self.routing.model_for(task_type)
         schema = provider_json_schema(response_model)
         system = "\n\n".join(m.content for m in messages if m.role == "system") or None
         conversation = [m for m in messages if m.role != "system"]
-        runs: list[ModelRun] = []
+        key = CacheKey(
+            self._provider.name,
+            model,
+            task_type,
+            prompt_version,
+            _generation_input_hash(model, prompt_version, system, conversation, schema),
+        )
+        if self._result_cache is not None:
+            cached = self._serve_cached(self._result_cache, key, response_model, validator, context)
+            if cached is not None:
+                return cached
 
+        runs: list[ModelRun] = []
         first = self._generate_once(
-            task_type, model, system, conversation, schema, response_model, prompt_version,
-            context, timeout, validator, attempt=1, repair_of=None, runs=runs,
+            key, system, conversation, schema, response_model, context, timeout, validator,
+            attempt=1, repair_of=None, runs=runs,
         )  # fmt: skip
         if isinstance(first, _Parsed):
+            self._remember(key, runs[-1])
             return StructuredResult(parsed=first.value, run=runs[-1], runs=tuple(runs))
 
         repair_messages = [
@@ -135,30 +183,68 @@ class ModelGateway:
             Message("user", REPAIR_INSTRUCTION.format(errors=first.errors)),
         ]
         second = self._generate_once(
-            task_type, model, system, repair_messages, schema, response_model, prompt_version,
-            context, timeout, validator, attempt=2, repair_of=runs[-1], runs=runs,
+            key, system, repair_messages, schema, response_model, context, timeout, validator,
+            attempt=2, repair_of=runs[-1], runs=runs,
         )  # fmt: skip
         if isinstance(second, _Parsed):
+            # The repaired output answers the ORIGINAL request, so it is cached under its key.
+            self._remember(key, runs[-1])
             return StructuredResult(parsed=second.value, run=runs[-1], runs=tuple(runs))
         logger.warning(
             "model output invalid after repair task=%s prompt=%s trace=%s",
-            task_type,
-            prompt_version,
+            key.task_type,
+            key.prompt_version,
             context.trace_id,
         )
         raise ModelOutputInvalidError(
-            f"{task_type}: output invalid after one repair attempt", tuple(runs)
+            f"{key.task_type}: output invalid after one repair attempt", tuple(runs)
         )
+
+    def _serve_cached[T: BaseModel](
+        self,
+        cache: ResultCache,
+        key: CacheKey,
+        response_model: type[T],
+        validator: Callable[[T], None] | None,
+        context: RunContext,
+    ) -> StructuredResult[T] | None:
+        started = self._clock()
+        cached = cache.get(key)
+        if cached is None or cached.output is None:
+            return None
+        # Served outputs pass the same strict validation as fresh ones.
+        parsed, errors, _ = _validate(cached.output, response_model, validator)
+        if parsed is None:
+            logger.warning(
+                "cached output fails current validation; calling the provider task=%s "
+                "source_run=%s: %s",
+                key.task_type,
+                cached.source_run_id,
+                errors[:200],
+            )
+            return None
+        output = parsed.model_dump(mode="json")
+        run = self._run(
+            context, key.task_type, key.model, key.prompt_version, key.input_hash, started,
+            status=ModelRunStatus.SUCCEEDED, output=output,
+            output_hash=cached.output_hash or sha256_hex(_canonical_json(output)),
+            cache_key=key.digest, cache_source_run_id=cached.source_run_id,
+        )  # fmt: skip
+        self._recorder.record(run)
+        return StructuredResult(parsed=parsed, run=run, runs=(run,), cache_hit=True)  # type: ignore[arg-type]
+
+    def _remember(self, key: CacheKey, run: ModelRun) -> None:
+        if self._result_cache is not None and run.output is not None:
+            result = CachedResult(run.id, output_hash=run.output_hash, output=run.output)
+            self._result_cache.put(key, result)
 
     def _generate_once(
         self,
-        task_type: str,
-        model: str,
+        key: CacheKey,
         system: str | None,
         conversation: list[Message],
         schema: dict[str, Any],
         response_model: type[BaseModel],
-        prompt_version: str,
         context: RunContext,
         timeout: float | None,
         validator: Callable[[Any], None] | None,
@@ -167,58 +253,55 @@ class ModelGateway:
         repair_of: ModelRun | None,
         runs: list[ModelRun],
     ) -> "_Parsed | _Invalid":
-        input_hash = sha256_hex(
-            _canonical_json(
-                {
-                    "model": model,
-                    "prompt_version": prompt_version,
-                    "system": system,
-                    "messages": [[m.role, m.content] for m in conversation],
-                    "schema": schema,
-                }
-            )
+        task_type, model, prompt_version = key.task_type, key.model, key.prompt_version
+        # The row records exactly what was sent (a repair has its own input hash).
+        input_hash = (
+            key.input_hash
+            if attempt == 1
+            else _generation_input_hash(model, prompt_version, system, conversation, schema)
         )
-        self._generation_limiter.acquire()
-        started = self._clock()
-        try:
-            response = self._provider.generate_json(
-                model=model,
-                system=system,
-                messages=conversation,
-                json_schema=schema,
-                timeout=timeout or self._default_timeout,
-            )
-        except ProviderError as exc:
+        with self._provider_slot(model, "generation"):
+            started = self._clock()
+            try:
+                response = self._provider.generate_json(
+                    model=model,
+                    system=system,
+                    messages=conversation,
+                    json_schema=schema,
+                    timeout=timeout or self._default_timeout,
+                )
+            except ProviderError as exc:
+                run = self._run(
+                    context, task_type, model, prompt_version, input_hash, started,
+                    status=_status_for(exc), attempt=attempt, repair_of=repair_of,
+                    error_code=exc.code, error_message=str(exc),
+                )  # fmt: skip
+                runs.append(run)
+                self._recorder.record(run)
+                raise _gateway_error(exc, task_type, tuple(runs)) from exc
+
+            parsed, errors, error_code = _parse(response.text, response_model, validator)
+            if parsed is None:
+                run = self._run(
+                    context, task_type, model, prompt_version, input_hash, started,
+                    status=ModelRunStatus.INVALID_OUTPUT, attempt=attempt, repair_of=repair_of,
+                    usage=response.usage, error_code=error_code, error_message=errors,
+                    output_hash=sha256_hex(response.text),
+                )  # fmt: skip
+                runs.append(run)
+                self._recorder.record(run)
+                return _Invalid(raw_text=response.text, errors=errors)
+
+            output = parsed.model_dump(mode="json")
             run = self._run(
                 context, task_type, model, prompt_version, input_hash, started,
-                status=_status_for(exc), attempt=attempt, repair_of=repair_of,
-                error_code=exc.code, error_message=str(exc),
+                status=ModelRunStatus.SUCCEEDED, attempt=attempt, repair_of=repair_of,
+                usage=response.usage, output=output,
+                output_hash=sha256_hex(_canonical_json(output)), cache_key=key.digest,
             )  # fmt: skip
             runs.append(run)
             self._recorder.record(run)
-            raise _gateway_error(exc, task_type, tuple(runs)) from exc
-
-        parsed, errors, error_code = _parse(response.text, response_model, validator)
-        if parsed is None:
-            run = self._run(
-                context, task_type, model, prompt_version, input_hash, started,
-                status=ModelRunStatus.INVALID_OUTPUT, attempt=attempt, repair_of=repair_of,
-                usage=response.usage, error_code=error_code, error_message=errors,
-                output_hash=sha256_hex(response.text),
-            )  # fmt: skip
-            runs.append(run)
-            self._recorder.record(run)
-            return _Invalid(raw_text=response.text, errors=errors)
-
-        output = parsed.model_dump(mode="json")
-        run = self._run(
-            context, task_type, model, prompt_version, input_hash, started,
-            status=ModelRunStatus.SUCCEEDED, attempt=attempt, repair_of=repair_of,
-            usage=response.usage, output=output, output_hash=sha256_hex(_canonical_json(output)),
-        )  # fmt: skip
-        runs.append(run)
-        self._recorder.record(run)
-        return _Parsed(parsed)
+            return _Parsed(parsed)
 
     # ------------------------------------------------------------------
     # Embeddings
@@ -251,63 +334,116 @@ class ModelGateway:
         for start, end in _chunks(texts):
             chunk = list(texts[start:end])
             chunk_titles = list(titles[start:end]) if titles is not None else None
-            input_hash = sha256_hex(
-                _canonical_json(
-                    {
-                        "model": model,
-                        "prompt_version": prompt_version,
-                        "input_type": input_type,
-                        "dimension": output_dimension,
-                        "texts": chunk,
-                        "titles": chunk_titles,
-                    }
-                )
+            key = CacheKey(
+                self._provider.name,
+                model,
+                task_type,
+                prompt_version,
+                sha256_hex(
+                    _canonical_json(
+                        {
+                            "model": model,
+                            "prompt_version": prompt_version,
+                            "input_type": input_type,
+                            "dimension": output_dimension,
+                            "texts": chunk,
+                            "titles": chunk_titles,
+                        }
+                    )
+                ),
             )
-            self._embedding_limiter.acquire()
             started = self._clock()
-            try:
-                response = self._provider.embed(
-                    model=model,
-                    texts=chunk,
-                    titles=chunk_titles,
-                    input_type=input_type,
-                    output_dimension=output_dimension,
-                    timeout=timeout or self._default_timeout,
+            cached = self._embedding_cache.get(key) if self._embedding_cache is not None else None
+            if cached and cached.vectors is not None and len(cached.vectors) == len(chunk):
+                run = self._run(
+                    context, task_type, model, prompt_version, key.input_hash, started,
+                    status=ModelRunStatus.SUCCEEDED, output_hash=cached.output_hash,
+                    cache_key=key.digest, cache_source_run_id=cached.source_run_id,
+                )  # fmt: skip
+                runs.append(run)
+                self._recorder.record(run)
+                vectors.extend(list(v) for v in cached.vectors)
+                vector_run_ids.extend([run.id] * len(cached.vectors))
+                continue
+
+            with self._provider_slot(model, "embedding"):
+                started = self._clock()
+                try:
+                    response = self._provider.embed(
+                        model=model,
+                        texts=chunk,
+                        titles=chunk_titles,
+                        input_type=input_type,
+                        output_dimension=output_dimension,
+                        timeout=timeout or self._default_timeout,
+                    )
+                except ProviderError as exc:
+                    run = self._run(
+                        context, task_type, model, prompt_version, key.input_hash, started,
+                        status=_status_for(exc), error_code=exc.code, error_message=str(exc),
+                    )  # fmt: skip
+                    runs.append(run)
+                    self._recorder.record(run)
+                    raise _gateway_error(exc, task_type, tuple(runs)) from exc
+
+                problem = _check_vectors(response.vectors, len(chunk), output_dimension)
+                if problem:
+                    run = self._run(
+                        context, task_type, model, prompt_version, key.input_hash, started,
+                        status=ModelRunStatus.INVALID_OUTPUT, usage=response.usage,
+                        error_code="EMBEDDING_SHAPE", error_message=problem,
+                    )  # fmt: skip
+                    runs.append(run)
+                    self._recorder.record(run)
+                    raise ModelOutputInvalidError(f"{task_type}: {problem}", tuple(runs))
+
+                run = self._run(
+                    context, task_type, model, prompt_version, key.input_hash, started,
+                    status=ModelRunStatus.SUCCEEDED, usage=response.usage,
+                    output_hash=sha256_hex(_canonical_json(response.vectors)), cache_key=key.digest,
+                )  # fmt: skip
+                runs.append(run)
+                self._recorder.record(run)
+            normalized = [_normalize(v) for v in response.vectors]
+            if self._embedding_cache is not None:
+                self._embedding_cache.put(
+                    key,
+                    CachedResult(
+                        source_run_id=run.id,
+                        output_hash=run.output_hash,
+                        vectors=tuple(tuple(v) for v in normalized),
+                    ),
                 )
-            except ProviderError as exc:
-                run = self._run(
-                    context, task_type, model, prompt_version, input_hash, started,
-                    status=_status_for(exc), error_code=exc.code, error_message=str(exc),
-                )  # fmt: skip
-                runs.append(run)
-                self._recorder.record(run)
-                raise _gateway_error(exc, task_type, tuple(runs)) from exc
-
-            problem = _check_vectors(response.vectors, len(chunk), output_dimension)
-            if problem:
-                run = self._run(
-                    context, task_type, model, prompt_version, input_hash, started,
-                    status=ModelRunStatus.INVALID_OUTPUT, usage=response.usage,
-                    error_code="EMBEDDING_SHAPE", error_message=problem,
-                )  # fmt: skip
-                runs.append(run)
-                self._recorder.record(run)
-                raise ModelOutputInvalidError(f"{task_type}: {problem}", tuple(runs))
-
-            run = self._run(
-                context, task_type, model, prompt_version, input_hash, started,
-                status=ModelRunStatus.SUCCEEDED, usage=response.usage,
-                output_hash=sha256_hex(_canonical_json(response.vectors)),
-            )  # fmt: skip
-            runs.append(run)
-            self._recorder.record(run)
-            vectors.extend(_normalize(v) for v in response.vectors)
-            vector_run_ids.extend([run.id] * len(response.vectors))
+            vectors.extend(normalized)
+            vector_run_ids.extend([run.id] * len(normalized))
         return EmbeddingResult(
             vectors=vectors, model=model, runs=tuple(runs), vector_run_ids=tuple(vector_run_ids)
         )
 
     # ------------------------------------------------------------------
+    @contextmanager
+    def _provider_slot(
+        self, model: str, kind: Literal["generation", "embedding"]
+    ) -> Iterator[None]:
+        """Budget first (fail fast, nothing sent), then the per-model RPM limiter."""
+        if self.budget is None:
+            self._limiter(model, kind).acquire()
+            yield
+            return
+        with self.budget.request(self._provider.name, model):
+            self._limiter(model, kind).acquire()
+            yield
+
+    def _limiter(
+        self, model: str, kind: Literal["generation", "embedding"]
+    ) -> "RequestRateLimiter":
+        # Free-tier rate limits are per model, so each model gets its own window.
+        with self._limiters_lock:
+            limiter = self._limiters.get(model)
+            if limiter is None:
+                limiter = self._limiters[model] = self._limiter_factory(self._rpm[kind])
+            return limiter
+
     def _run(
         self,
         context: RunContext,
@@ -325,11 +461,14 @@ class ModelGateway:
         output_hash: str | None = None,
         error_code: str | None = None,
         error_message: str | None = None,
+        cache_key: str | None = None,
+        cache_source_run_id: UUID | None = None,
     ) -> ModelRun:
         usage = usage or ProviderUsage()
         latency_ms = max(0, int(round((self._clock() - started) * 1000)))
         logger.info(
-            "model_run task=%s model=%s prompt=%s status=%s attempt=%d ms=%d tokens=%s trace=%s",
+            "model_run task=%s model=%s prompt=%s status=%s attempt=%d ms=%d tokens=%s "
+            "source=%s trace=%s",
             task_type,
             model,
             prompt_version,
@@ -337,6 +476,7 @@ class ModelGateway:
             attempt,
             latency_ms,
             usage.total_tokens,
+            f"cache:{cache_source_run_id}" if cache_source_run_id else "provider",
             context.trace_id,
         )
         return ModelRun(
@@ -361,6 +501,9 @@ class ModelGateway:
             learner_id=context.learner_id,
             course_id=context.course_id,
             processing_job_id=context.processing_job_id,
+            # Never on a failure: only validated outputs are cacheable (migration 0004 check).
+            cache_key=cache_key if status is ModelRunStatus.SUCCEEDED else None,
+            cache_source_run_id=cache_source_run_id,
         )
 
 
@@ -388,6 +531,26 @@ def _require_versioned(task_type: str, prompt_version: str) -> None:
         raise ValueError(f"invalid task_type {task_type!r}")
 
 
+def _generation_input_hash(
+    model: str,
+    prompt_version: str,
+    system: str | None,
+    conversation: Sequence[Message],
+    schema: dict[str, Any],
+) -> str:
+    return sha256_hex(
+        _canonical_json(
+            {
+                "model": model,
+                "prompt_version": prompt_version,
+                "system": system,
+                "messages": [[m.role, m.content] for m in conversation],
+                "schema": schema,
+            }
+        )
+    )
+
+
 def _parse(
     text: str, response_model: type[BaseModel], validator: SemanticValidator | None
 ) -> tuple[BaseModel | None, str, str]:
@@ -399,6 +562,12 @@ def _parse(
         payload = json.loads(stripped)
     except (json.JSONDecodeError, ValueError) as exc:
         return None, f"response is not valid JSON: {exc}"[:_MAX_ERROR_DETAIL_CHARS], "JSON_PARSE"
+    return _validate(payload, response_model, validator)
+
+
+def _validate(
+    payload: Any, response_model: type[BaseModel], validator: SemanticValidator | None
+) -> tuple[BaseModel | None, str, str]:
     try:
         parsed = response_model.model_validate(payload, strict=True)
     except ValidationError as exc:

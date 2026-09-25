@@ -77,7 +77,10 @@ cp services/backend/.env.example services/backend/.env
 | `DATABASE_URL` | backend | Postgres connection string (Supabase session pooler). Server only. |
 | `GEMINI_API_KEY` | backend | Google AI key. Server only. Without it the worker stays idle and jobs stay `PENDING`. |
 | `GEMINI_GENERATION_MODEL`, `GEMINI_EMBEDDING_MODEL` | backend | Defaults `gemini-3.7-flash`, `gemini-embedding-2` (768 dims). |
-| `GEMINI_GENERATION_RPM`, `GEMINI_EMBEDDING_RPM` | backend | Optional client-side request limits per minute (free tier: 5 RPM generation). 429/503 never fail a job; it is deferred. |
+| `GEMINI_GENERATION_RPM`, `GEMINI_EMBEDDING_RPM` | backend | Optional client-side request limits per minute and model (free tier: 5 RPM). 429/503 never fail a job; it is deferred. |
+| `GEMINI_ROUTINE_MODEL`, `GEMINI_ROUTINE_THINKING_LEVEL` | backend | Opt-in free-tier routing (ADR 0004): routine per-turn analysis on this model (e.g. `gemini-3.5-flash-lite`); graph bootstrap and adjudication stay on `GEMINI_GENERATION_MODEL`. |
+| `MODEL_DAILY_REQUEST_LIMITS`, `MODEL_QUOTA_RESERVE` | backend | Daily request budget per model (default `gemini-3.7-flash=20,gemini-3.8-flash=20`, reserve 2; `off` disables). A job that would spend the reserve is deferred, never failed. |
+| `MODEL_RESULT_CACHE`, `TURN_ANALYSIS_MODE` | backend | Exact result cache (default on) and turn execution: `combined` (default, 1 generation request per normal turn) or `staged`. |
 | `WORKER_ENABLED` | backend | In-process worker loop (default `true`); `false` to run `python -m app.jobs.worker` separately. |
 
 The service-role key and the Gemini API key must never appear in web or extension code.

@@ -139,15 +139,14 @@ class FakeProvider:
         return ProviderEmbeddingResponse([self.embed_fn(t) for t in texts])
 
 
-def make_gateway(provider: FakeProvider) -> tuple[ModelGateway, InMemoryRunRecorder]:
-    recorder = InMemoryRunRecorder()
-    gateway = ModelGateway(
-        provider,
-        recorder,
-        generation_model="gemini-3.7-flash",
-        embedding_model="gemini-embedding-2",
-        default_timeout=5,
-    )
+def make_gateway(
+    provider: FakeProvider, recorder: InMemoryRunRecorder | None = None, **options: Any
+) -> tuple[ModelGateway, InMemoryRunRecorder]:
+    """options: ModelGateway keyword arguments (result_cache, budget, routine_model, ...)."""
+    recorder = recorder or InMemoryRunRecorder()
+    options.setdefault("generation_model", "gemini-3.7-flash")
+    options.setdefault("embedding_model", "gemini-embedding-2")
+    gateway = ModelGateway(provider, recorder, default_timeout=5, **options)
     return gateway, recorder
 
 
@@ -158,12 +157,14 @@ MARKERS = {
     "rerank": "You rank candidate skills",
     "mapping": "You are the skill mapper",
     "adjudication": "second-pass adjudicator",
+    "turn": "You are the turn analyst",
+    "turn_adjudication": "You are the turn adjudicator",
 }
 
 
 def route_responder(**handlers: Any) -> Responder:
     """handlers: engine name -> response (dict/str/Exception), list of responses consumed in
-    order, or callable(messages) -> response."""
+    order (each may be a callable), or callable(messages) -> response."""
     queues = {k: list(v) for k, v in handlers.items() if isinstance(v, list)}
 
     def respond(system: str, messages: list[Message], schema: dict[str, Any]) -> Any:
@@ -175,7 +176,8 @@ def route_responder(**handlers: Any) -> Responder:
                 if engine in queues:
                     if not queues[engine]:
                         raise AssertionError(f"no scripted {engine} responses left")
-                    return queues[engine].pop(0)
+                    scripted = queues[engine].pop(0)
+                    return scripted(messages) if callable(scripted) else scripted
                 if callable(handler):
                     return handler(messages)
                 return handler
@@ -210,6 +212,37 @@ def segment(
         "skill_bearing_confidence": skill_bearing_confidence,
         "reason_code": reason_code,
     }
+
+
+def turn_segment(
+    text: str = "How do I loop over a list in Python?",
+    *,
+    ranked: Sequence[str] = (),
+    mappings: Sequence[dict[str, Any]] = (),
+    new_skill: dict[str, Any] | None = None,
+    **qualification: Any,
+) -> dict[str, Any]:
+    """One segment of a TURN_ANALYSIS output: qualification + top-K ids + mapping proposals."""
+    return {
+        **segment(text, **qualification),
+        "ranked_candidate_ids": list(ranked),
+        "mappings": list(mappings),
+        "new_skill_candidate": new_skill,
+    }
+
+
+def proposal(skill_id: str, confidence: float, span: str = "loop over a list") -> dict[str, Any]:
+    return {
+        "skill_id": skill_id,
+        "confidence": confidence,
+        "evidence_span": span,
+        "reason_code": "CONCEPT_USE",
+    }
+
+
+def item_ids_in(messages: list[Message]) -> list[str]:
+    """The item ids a turn adjudication was asked about, in order."""
+    return re.findall(r"item_id=(a[0-9]+)", messages[-1].content)
 
 
 def graph_proposal(names: list[str], *, topics: int = 4, prefix: str = "") -> dict[str, Any]:

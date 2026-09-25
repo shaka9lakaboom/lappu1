@@ -1,8 +1,10 @@
 """PROCESS_RAW_MESSAGE job, P3A scope (architecture §9.1-§9.4).
 
-    claim -> pair/prepare turn -> qualify -> route -> retrieve -> map/abstain
-          -> persist analysis -> complete
+    claim -> pair/prepare turn -> analyse (qualify, route, retrieve, rerank,
+          map/abstain; see processing/analysis.py) -> persist analysis -> complete
 
+The analysis mode is "combined" by default (local retrieval, then one
+TURN_ANALYSIS call and at most one adjudication call; ADR 0004) or "staged".
 Model calls run outside any database transaction; the analysis is written in
 one transaction at the end. The pipeline stops after mapping/abstention:
 attribution and EvidenceEvents are P3B.
@@ -14,8 +16,8 @@ from uuid import UUID
 from psycopg import Connection
 from psycopg_pool import ConnectionPool
 
-from app.intelligence.mapping.engine import map_segment
 from app.intelligence.policy import load_policy
+from app.intelligence.processing.analysis import AnalysisMode, analyze_unit
 from app.intelligence.processing.persist import (
     ANALYSIS_VERSION,
     SegmentAnalysis,
@@ -23,16 +25,7 @@ from app.intelligence.processing.persist import (
     persist_analysis,
 )
 from app.intelligence.processing.turn import ProcessingUnit, build_unit, clip, render_context
-from app.intelligence.relevance.engine import (
-    PROMPT_VERSION as QUALIFICATION_PROMPT_VERSION,
-)
-from app.intelligence.relevance.engine import (
-    ProcessingUnitText,
-    qualify_unit,
-    unit_as_text,
-)
-from app.intelligence.relevance.routing import route_segment
-from app.intelligence.retrieval.engine import retrieve_candidates
+from app.intelligence.relevance.engine import ProcessingUnitText
 from app.jobs.queue import ClaimedJob, JobResult
 from app.model_gateway import ModelGateway, RunContext
 
@@ -103,7 +96,11 @@ def overall_outcome(analyses: list[SegmentAnalysis]) -> str:
 
 
 def process_raw_message_job(
-    pool: ConnectionPool, gateway: ModelGateway, job: ClaimedJob
+    pool: ConnectionPool,
+    gateway: ModelGateway,
+    job: ClaimedJob,
+    *,
+    mode: AnalysisMode = "combined",
 ) -> JobResult:
     with pool.connection() as conn:
         policy = load_policy(conn)
@@ -128,68 +125,21 @@ def process_raw_message_job(
         policy.processing_unit.unit_max_chars,
         policy.processing_unit.recent_context_max_chars,
     )
-    qualification = qualify_unit(gateway, text, policy.qualification, context)
-
-    analyses: list[SegmentAnalysis] = []
-    if qualification.segments is None:
-        analyses.append(
-            SegmentAnalysis(
-                text=unit_as_text(text),
-                segment=None,
-                route="UNCERTAIN",
-                route_reason=qualification.abstain_reason or "MODEL_OUTPUT_INVALID",
-                reason_code=qualification.abstain_reason or "MODEL_OUTPUT_INVALID",
-            )
-        )
-    else:
-        for segment in qualification.segments:
-            routed = route_segment(
-                segment, context_incomplete=unit.context_incomplete, policy=policy.qualification
-            )
-            retrieval = mapping = None
-            if routed.route == "MAP":
-                with pool.connection() as conn:
-                    retrieval = retrieve_candidates(
-                        conn,
-                        gateway,
-                        query_text=segment.text,
-                        course_ids=course_ids,
-                        course_context=text.course_context,
-                        policy=policy.retrieval,
-                        context=context,
-                    )
-                by_id = {c.skill_id: c for c in retrieval.candidates}
-                mapping = map_segment(
-                    gateway,
-                    segment_text=segment.text,
-                    course_context=text.course_context,
-                    candidates=[by_id[i] for i in retrieval.reranked_ids],
-                    policy=policy.mapping,
-                    context=context,
-                )
-            analyses.append(
-                SegmentAnalysis(
-                    text=segment.text,
-                    segment=segment,
-                    route=routed.route,
-                    route_reason=routed.reason,
-                    reason_code=segment.reason_code,
-                    retrieval=retrieval,
-                    mapping=mapping,
-                )
-            )
+    result = analyze_unit(
+        pool, gateway, text, course_ids=course_ids, policy=policy, context=context, mode=mode
+    )
 
     with pool.connection() as conn:
         written = persist_analysis(
             conn,
             unit=unit,
-            analyses=analyses,
+            analyses=result.analyses,
             course_ids=course_ids,
-            qualification_run_id=qualification.run.id if qualification.run else None,
-            qualification_prompt_version=QUALIFICATION_PROMPT_VERSION,
+            qualification_run_id=result.qualification_run_id,
+            qualification_prompt_version=result.qualification_prompt_version,
             policy_snapshot=policy.snapshot(),
             processing_job_id=job.id,
         )
     if not written:
         return JobResult("ALREADY_ANALYZED")
-    return JobResult(overall_outcome(analyses))
+    return JobResult(overall_outcome(result.analyses))

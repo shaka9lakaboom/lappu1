@@ -6,9 +6,14 @@ cosine channel (up to `channel_limit` each). The union is then scored exactly
 (both channels for every pooled skill) and cut to the top `pool_size`; a
 structured rerank picks the top `rerank_size` handed to the mapper.
 
+`retrieve_pool` is the local part (one query embedding, no generation call).
+The staged path reranks with its own call (`retrieve_candidates`); the combined
+turn analysis reranks inside its single call (ADR 0004).
+
 Only ACTIVE, assessable (SKILL/SUBSKILL) nodes are ever candidates.
 """
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from psycopg import Connection
@@ -144,17 +149,25 @@ def to_contract(scored: list[ScoredCandidate]) -> list[SkillCandidate]:
     ]
 
 
-def retrieve_candidates(
+@dataclass(frozen=True)
+class CandidatePool:
+    """The scored top-N pool (rank order) and the query embedding run behind it."""
+
+    query_text: str
+    candidates: list[SkillCandidate]
+    query_model_run_id: UUID
+
+
+def retrieve_pool(
     conn: Connection,
     gateway: ModelGateway,
     *,
     query_text: str,
     course_ids: list[UUID],
-    course_context: str,
     policy: RetrievalPolicy,
     context: RunContext,
-) -> RetrievalResult:
-    """Embed the query, gather and score the top-N pool, rerank to the top-K."""
+) -> CandidatePool:
+    """Embed the query and gather + score the top-N pool. No generation call."""
     text = query_text[: policy.query_max_chars]
     embedded = gateway.embed(
         texts=[text],
@@ -171,20 +184,45 @@ def retrieve_candidates(
         embedding_model=embedded.model,
         channel_limit=policy.channel_limit,
     )
-    pool = to_contract(score_candidates(raw, policy.weights, policy.pool_size))
+    return CandidatePool(
+        query_text=text,
+        candidates=to_contract(score_candidates(raw, policy.weights, policy.pool_size)),
+        query_model_run_id=embedded.runs[-1].id,
+    )
+
+
+def retrieve_candidates(
+    conn: Connection,
+    gateway: ModelGateway,
+    *,
+    query_text: str,
+    course_ids: list[UUID],
+    course_context: str,
+    policy: RetrievalPolicy,
+    context: RunContext,
+) -> RetrievalResult:
+    """Staged path: embed the query, gather and score the top-N pool, rerank to the top-K."""
+    pool = retrieve_pool(
+        conn,
+        gateway,
+        query_text=query_text,
+        course_ids=course_ids,
+        policy=policy,
+        context=context,
+    )
     reranked, rerank_run_id, fallback = rerank_candidates(
         gateway,
-        segment_text=text,
+        segment_text=pool.query_text,
         course_context=course_context,
-        candidates=pool,
+        candidates=pool.candidates,
         rerank_size=policy.rerank_size,
         context=context,
     )
     return RetrievalResult(
         course_ids=tuple(course_ids),
-        candidates=tuple(pool),
+        candidates=tuple(pool.candidates),
         reranked_ids=tuple(reranked),
         rerank_fallback=fallback,
-        query_model_run_id=embedded.runs[-1].id,
+        query_model_run_id=pool.query_model_run_id,
         rerank_model_run_id=rerank_run_id,
     )

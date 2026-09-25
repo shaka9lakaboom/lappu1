@@ -33,15 +33,19 @@ from app.jobs.queue import (
     fail_job,
     recover_stale_jobs,
 )
-from app.model_gateway import ModelGateway, ModelGatewayError
+from app.model_gateway import ModelBudgetExhaustedError, ModelGateway, ModelGatewayError
 
 logger = logging.getLogger("skillmirror.worker")
 
 # Provider backpressure (429 / 503): re-queue after the server's retry hint (clamped)
 # or a default delay, without spending an attempt. The job stays pending, never FAILED.
+# No retry loop: one deferral per failed request, at least BACKPRESSURE_MIN_DELAY apart.
 BACKPRESSURE_MIN_DELAY = 15
 BACKPRESSURE_DEFAULT_DELAY = 60
 BACKPRESSURE_MAX_DELAY = 600
+# Daily request budget spent (nothing was sent): wait for the quota day to reset,
+# re-checking (a database count, no provider request) at most hourly.
+BUDGET_MAX_DELAY = 3600
 
 Handler = Callable[[ClaimedJob], JobResult]
 FailureHook = Callable[[ClaimedJob, str, bool], None]
@@ -141,15 +145,19 @@ class Worker:
         logger.info("job %s %s -> %s", job.id, job.job_type, result.outcome)
 
     def _backpressure(self, job: ClaimedJob, exc: ModelGatewayError) -> None:
+        budget = isinstance(exc, ModelBudgetExhaustedError)
         hint = exc.retry_after or BACKPRESSURE_DEFAULT_DELAY
-        delay = int(min(max(hint, BACKPRESSURE_MIN_DELAY), BACKPRESSURE_MAX_DELAY))
+        ceiling = BUDGET_MAX_DELAY if budget else BACKPRESSURE_MAX_DELAY
+        delay = int(min(max(hint, BACKPRESSURE_MIN_DELAY), ceiling))
+        outcome = "MODEL_BUDGET_RESERVE" if budget else "MODEL_BACKPRESSURE"
         with self._pool.connection() as conn:
-            defer_job(conn, job.id, timedelta(seconds=delay), "MODEL_BACKPRESSURE")
+            defer_job(conn, job.id, timedelta(seconds=delay), outcome)
         self.stats.backpressure += 1
         logger.warning(
-            "job %s %s: model backpressure (%s); retrying in %ds without spending an attempt",
+            "job %s %s: %s (%s); retrying in %ds without spending an attempt",
             job.id,
             job.job_type,
+            "request budget reserve reached" if budget else "model backpressure",
             exc,
             delay,
         )
@@ -190,7 +198,13 @@ class Worker:
             hook(job, error, True)
 
 
-def build_worker(pool: ConnectionPool, gateway: ModelGateway, **kwargs: object) -> Worker:
+def build_worker(
+    pool: ConnectionPool,
+    gateway: ModelGateway,
+    *,
+    turn_analysis_mode: str = "combined",
+    **kwargs: object,
+) -> Worker:
     """The production worker: P2 course bootstrap + P3A raw-message processing."""
     from app.intelligence.processing.pipeline import process_raw_message_job
     from app.intelligence.skill_graph.jobs import mark_bootstrap_failed, run_bootstrap_job
@@ -199,7 +213,9 @@ def build_worker(pool: ConnectionPool, gateway: ModelGateway, **kwargs: object) 
         pool,
         {
             JOB_BOOTSTRAP_COURSE_GRAPH: partial(run_bootstrap_job, pool, gateway),
-            JOB_PROCESS_RAW_MESSAGE: partial(process_raw_message_job, pool, gateway),
+            JOB_PROCESS_RAW_MESSAGE: partial(
+                process_raw_message_job, pool, gateway, mode=turn_analysis_mode
+            ),
         },
         failure_hooks={
             JOB_BOOTSTRAP_COURSE_GRAPH: lambda job, error, final: mark_bootstrap_failed(
@@ -210,10 +226,28 @@ def build_worker(pool: ConnectionPool, gateway: ModelGateway, **kwargs: object) 
     )
 
 
+def log_model_policy(gateway: ModelGateway, turn_analysis_mode: str) -> None:
+    """One startup line: routing policy, analysis mode and the budget of the day."""
+    routing = gateway.routing
+    budget = ", ".join(
+        f"{s.model} {s.used}/{s.limit} used, reserve {s.reserve}, {s.available} available"
+        for s in gateway.budget_status()
+    )
+    logger.info(
+        "model policy %s: default=%s routine=%s embedding=%s turn_analysis=%s budget=[%s]",
+        routing.name,
+        routing.default_model,
+        routing.routine_model or routing.default_model,
+        gateway.embedding_model,
+        turn_analysis_mode,
+        budget or "off",
+    )
+
+
 def main() -> None:  # pragma: no cover - thin CLI
     from app.core.config import get_settings
     from app.db.pool import create_pool
-    from app.model_gateway import build_gateway
+    from app.model_gateway import ModelRunsSchemaError, build_gateway
     from app.observability.logging import configure_logging
 
     parser = argparse.ArgumentParser(description="SkillMirror processing worker")
@@ -225,12 +259,18 @@ def main() -> None:  # pragma: no cover - thin CLI
     if settings.database_url is None:
         raise SystemExit("DATABASE_URL is not set")
     pool = create_pool(settings.database_url.get_secret_value())
-    gateway = build_gateway(settings, pool)
+    try:
+        gateway = build_gateway(settings, pool)
+    except ModelRunsSchemaError as exc:
+        pool.close()
+        raise SystemExit(f"worker not started: {exc}") from exc
     if gateway is None:
         raise SystemExit("GEMINI_API_KEY is not set: the worker needs the model gateway")
+    log_model_policy(gateway, settings.turn_analysis_mode)
     worker = build_worker(
         pool,
         gateway,
+        turn_analysis_mode=settings.turn_analysis_mode,
         batch_size=settings.worker_batch_size,
         stale_after=timedelta(seconds=settings.worker_stale_after_seconds),
     )

@@ -6,7 +6,11 @@ import pytest
 
 from app.courses.models import CourseCreateRequest
 from app.courses.service import create_course
-from app.intelligence.retrieval.engine import fetch_raw_candidates, retrieve_candidates
+from app.intelligence.retrieval.engine import (
+    fetch_raw_candidates,
+    retrieve_candidates,
+    retrieve_pool,
+)
 from app.intelligence.skill_graph.canonical import skill_key, slugify
 from app.intelligence.skill_graph.embedding import skill_embedding_text, vector_literal
 from app.model_gateway import RunContext
@@ -211,6 +215,29 @@ def test_pool_is_top_20_and_mapper_gets_reranked_top_8(db_pool, registry, new_le
     assert len(seen[0]) == 20  # the reranker saw exactly the pool
     assert result.rerank_model_run_id == recorder.runs[-1].id
     assert set(ids) >= {c.skill_id for c in result.candidates}
+
+
+def test_local_retrieval_makes_no_generation_call(db_pool, registry, new_learner) -> None:
+    """The combined path retrieves BEFORE its single model call: lexical + pgvector over
+    the database, one query embedding, zero generation requests."""
+    with db_pool.connection() as conn:
+        for i in range(25):
+            add_skill(conn, f"{registry}Loop Pattern {i:02d}", f"Apply loop pattern number {i}.")
+        provider = FakeProvider()  # no responder: any generation request fails the test
+        gateway, recorder = make_gateway(provider)
+        pool = retrieve_pool(
+            conn,
+            gateway,
+            query_text=f"{registry.strip()} loop pattern",
+            course_ids=[],
+            policy=RETRIEVAL,
+            context=RunContext("t"),
+        )
+    assert provider.calls == [] and len(provider.embed_calls) == 1
+    assert len(pool.candidates) == 20 and [c.rank for c in pool.candidates] == list(range(1, 21))
+    assert all(c.lexical_score > 0 and c.semantic_similarity > 0 for c in pool.candidates[:5])
+    assert pool.query_model_run_id == recorder.runs[0].id
+    assert [r.task_type for r in recorder.runs] == ["EMBED_QUERY"]
 
 
 def test_only_active_assessable_skills_are_candidates(db_pool, registry, new_learner) -> None:

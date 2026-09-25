@@ -145,6 +145,20 @@ def test_bootstrap_job_builds_an_embedded_course_graph(db_pool, registry, new_le
     assert (len(provider.calls), len(provider.embed_calls)) == calls
 
 
+def test_course_bootstrap_is_one_generation_and_at_most_two_embedding_requests(
+    db_pool, registry, new_learner
+) -> None:
+    learner = new_learner()
+    course_id = new_course(db_pool, learner, f"{registry}Budget course")
+    sixty = names(registry) + [f"{registry}Extra Python Skill {i:02d}" for i in range(30)]
+    provider = FakeProvider(route_responder(graph=graph_proposal(sixty, prefix=registry)))
+    job = job_for(db_pool, course_id, JOB_BOOTSTRAP_COURSE_GRAPH)
+    assert run_bootstrap_job(db_pool, db_gateway(db_pool, provider), job).outcome == "GRAPH_READY"
+    # 60 skills (the policy maximum): 1 graph request + 2 embedding batches of <= 32.
+    assert len(provider.calls) == 1
+    assert [len(c["texts"]) for c in provider.embed_calls] == [32, 28]
+
+
 def test_second_course_reuses_canonical_skills_and_aliases(db_pool, registry, new_learner) -> None:
     learner = new_learner()
     first = new_course(db_pool, learner, "Python I")

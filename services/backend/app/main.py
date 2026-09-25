@@ -38,16 +38,23 @@ def _start_worker(settings: Settings) -> tuple[threading.Thread, threading.Event
         logger.warning("worker not started: GEMINI_API_KEY is not set (jobs stay PENDING)")
         return None
     from app.db.pool import get_db_pool
-    from app.jobs.worker import build_worker
-    from app.model_gateway import build_gateway
+    from app.jobs.worker import build_worker, log_model_policy
+    from app.model_gateway import ModelRunsSchemaError, build_gateway
 
     pool = get_db_pool(settings)
-    gateway = build_gateway(settings, pool)
+    try:
+        gateway = build_gateway(settings, pool)
+    except ModelRunsSchemaError as exc:
+        # Every model_runs insert would fail: keep jobs PENDING instead of burning attempts.
+        logger.error("worker not started: %s", exc)
+        return None
     if gateway is None:  # pragma: no cover - checked above
         return None
+    log_model_policy(gateway, settings.turn_analysis_mode)
     worker = build_worker(
         pool,
         gateway,
+        turn_analysis_mode=settings.turn_analysis_mode,
         batch_size=settings.worker_batch_size,
         stale_after=timedelta(seconds=settings.worker_stale_after_seconds),
     )

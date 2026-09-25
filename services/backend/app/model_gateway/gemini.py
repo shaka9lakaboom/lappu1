@@ -7,7 +7,7 @@ The API key is server-only and is never logged.
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal
 
 import httpx
@@ -28,6 +28,8 @@ logger = logging.getLogger("skillmirror.model_gateway.gemini")
 # (Gemini API embeddings guide). Older embedding models use task_type.
 _QUERY_PREFIX = "task: search result | query: "
 
+ThinkingLevel = Literal["minimal", "low", "medium", "high"]
+
 
 class GeminiProvider:
     name = "google"
@@ -36,11 +38,14 @@ class GeminiProvider:
         self,
         api_key: str,
         *,
-        thinking_level: Literal["low", "medium", "high"] = "low",
+        thinking_level: ThinkingLevel = "low",
+        thinking_levels: Mapping[str, ThinkingLevel] | None = None,
         client: Any | None = None,
     ) -> None:
         self._client = client or genai.Client(api_key=api_key)
         self._thinking_level = thinking_level
+        # Per-model overrides (e.g. a routine Flash-Lite model), else the default level.
+        self._thinking_levels = dict(thinking_levels or {})
 
     def generate_json(
         self,
@@ -62,7 +67,9 @@ class GeminiProvider:
             system_instruction=system,
             response_mime_type="application/json",
             response_json_schema=json_schema,
-            thinking_config=types.ThinkingConfig(thinking_level=self._thinking_level.upper()),
+            thinking_config=types.ThinkingConfig(
+                thinking_level=self._thinking_levels.get(model, self._thinking_level).upper()
+            ),
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
             http_options=types.HttpOptions(timeout=int(timeout * 1000)),
         )

@@ -6,6 +6,13 @@ persisted except model_runs (trace id `benchmark:<case_id>`).
 
     cd services/backend
     .venv/Scripts/python ../../benchmark/runners/p3a_smoke.py --course-id <uuid> [--out report.json]
+        [--mode combined|staged]
+
+It runs the production analysis (`analyze_unit`): in the default combined mode a
+case costs 1 generation request (2 if a mapping lands in the adjudication band),
+so the 12 cases need about 12-16 requests instead of about 36 staged. The gateway
+budget refuses requests that would touch the reserve; a refused case is reported
+as an error, not scored as a pass. Identical re-runs are served from the cache.
 
 CI only validates the case/label files and this module's scoring
 (services/backend/tests/test_benchmark_smoke.py).
@@ -76,15 +83,15 @@ def score_case(label: dict[str, Any], result: CaseResult) -> list[str]:
     return failures
 
 
-def run(course_id: str, out: Path | None) -> int:  # pragma: no cover - needs a live model
+def run(course_id: str, out: Path | None, mode: str = "combined") -> int:  # pragma: no cover
     sys.path.insert(0, str(BACKEND))
+    from uuid import UUID
+
     from app.core.config import get_settings
     from app.db.pool import create_pool
-    from app.intelligence.mapping.engine import map_segment
     from app.intelligence.policy import load_policy
-    from app.intelligence.relevance.engine import ProcessingUnitText, qualify_unit
-    from app.intelligence.relevance.routing import route_segment
-    from app.intelligence.retrieval.engine import retrieve_candidates
+    from app.intelligence.processing.analysis import analyze_unit
+    from app.intelligence.relevance.engine import ProcessingUnitText
     from app.model_gateway import RunContext, build_gateway
 
     settings = get_settings()
@@ -94,6 +101,8 @@ def run(course_id: str, out: Path | None) -> int:  # pragma: no cover - needs a 
     gateway = build_gateway(settings, pool)
     if gateway is None:
         raise SystemExit("GEMINI_API_KEY is not set")
+    for s in gateway.budget_status():
+        print(f"budget {s.model}: {s.used}/{s.limit} used, {s.available} available")
     with pool.connection() as conn:
         policy = load_policy(conn)
 
@@ -115,35 +124,21 @@ def run(course_id: str, out: Path | None) -> int:  # pragma: no cover - needs a 
         )
         result = CaseResult(case_id=case["case_id"], routes=[])
         try:
-            qualification = qualify_unit(gateway, unit, policy.qualification, ctx)
-            if qualification.segments is None:
-                result.routes = ["UNCERTAIN"]
-            for segment in qualification.segments or []:
-                decision = route_segment(
-                    segment, context_incomplete=unit.context_incomplete, policy=policy.qualification
-                )
-                result.routes.append(decision.route)
-                if decision.route != "MAP":
+            analysis = analyze_unit(
+                pool,
+                gateway,
+                unit,
+                course_ids=[UUID(course_id)],
+                policy=policy,
+                context=ctx,
+                mode=mode,
+            )
+            for segment in analysis.analyses:
+                result.routes.append(segment.route)
+                mapping, retrieval = segment.mapping, segment.retrieval
+                if mapping is None or retrieval is None:
                     continue
-                with pool.connection() as conn:
-                    retrieval = retrieve_candidates(
-                        conn,
-                        gateway,
-                        query_text=segment.text,
-                        course_ids=[course_id],
-                        course_context=course_context,
-                        policy=policy.retrieval,
-                        context=ctx,
-                    )
                 by_id = {c.skill_id: c for c in retrieval.candidates}
-                mapping = map_segment(
-                    gateway,
-                    segment_text=segment.text,
-                    course_context=course_context,
-                    candidates=[by_id[i] for i in retrieval.reranked_ids],
-                    policy=policy.mapping,
-                    context=ctx,
-                )
                 result.abstained = result.abstained or mapping.outcome == "ABSTAINED"
                 result.accepted_skills += [
                     by_id[s.skill_id].canonical_name
@@ -172,5 +167,6 @@ if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--course-id", required=True, help="a course whose skill graph is READY")
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--mode", choices=("combined", "staged"), default="combined")
     args = parser.parse_args()
-    raise SystemExit(run(args.course_id, args.out))
+    raise SystemExit(run(args.course_id, args.out, args.mode))

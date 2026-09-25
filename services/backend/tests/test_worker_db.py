@@ -185,3 +185,24 @@ def test_non_transient_model_errors_still_count_as_attempts(db_pool, new_learner
 
     Worker(db_pool, {TEST_JOB: bad_credentials}).run_once()
     assert job_state(db_pool, job_id)[:2] == ("RETRY_WAIT", 1)
+
+
+def test_spent_request_budget_defers_without_spending_attempts(db_pool, new_learner) -> None:
+    from app.model_gateway import ModelBudgetExhaustedError
+
+    (job_id,) = enqueue(db_pool, new_learner())
+
+    def budget_spent(job):
+        raise ModelBudgetExhaustedError("budget", transient=True, retry_after=7 * 3600.0)
+
+    worker = Worker(db_pool, {TEST_JOB: budget_spent})
+    worker.run_once()
+    state, attempts, outcome, _, _ = job_state(db_pool, job_id)
+    assert (state, attempts, outcome) == ("PENDING", 0, "MODEL_BUDGET_RESERVE")
+    assert worker.stats.backpressure == 1 and worker.stats.failed == 0
+    with db_pool.connection() as conn:
+        (delay,) = conn.execute(
+            "select extract(epoch from available_at - now()) from public.processing_jobs where id = %s",
+            (job_id,),
+        ).fetchone()
+    assert 3590 < float(delay) <= 3600  # re-checked hourly (a count query, no provider request)
