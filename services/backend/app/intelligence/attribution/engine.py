@@ -7,8 +7,11 @@ confidence, the exact learner and assistant spans, the Appendix A.3 evidence
 type and the outcome signal of the learner's own performance.
 
 The model may return only the supplied accepted skill ids, exactly one result
-each. Anything else is invalid output: one repair call, then an explicit
-abstention - the mappings stay valid and no evidence is written. Nothing here
+each, and a learner performance span must not quote text the assistant already
+wrote earlier in the conversation (the copy guard's rule, checked here so the
+model gets to quote the learner's own contribution instead). Anything else is
+invalid output: one repair call, then an explicit abstention - the mappings stay
+valid and no evidence is written. Nothing here
 decides evidence strength, mastery or debt: that is deterministic code
 (app/intelligence/evidence, mastery, debt). Captured text is untrusted data.
 """
@@ -18,6 +21,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from app.intelligence.contracts import AttributionItem, AttributionOutput
+from app.intelligence.evidence.engine import PERFORMANCE_TYPES, copied_from_ai
 from app.model_gateway import (
     Message,
     ModelGateway,
@@ -134,6 +138,10 @@ class AttributionRequest:
     skills: tuple[AcceptedSkill, ...]
     # Learner text found in earlier assistant output of the conversation (the copy guard's view).
     reused_ai_text: tuple[str, ...] = ()
+    # The copy guard's inputs: a learner performance span it would reclassify as the AI's is
+    # invalid output (one repair). None = not checked here (the qualification still is).
+    prior_assistant_texts: tuple[str, ...] = ()
+    copy_guard_min_chars: int | None = None
 
 
 @dataclass(frozen=True)
@@ -202,6 +210,25 @@ def attribute_segment(
         missing = sorted(expected - set(ids))
         if missing:
             raise ValueError(f"missing an attribution for accepted skill ids: {missing[:5]}")
+        if request.copy_guard_min_chars is None:
+            return
+        for a in output.attributions:
+            span = a.student_evidence_span
+            if (
+                a.actor in ("STUDENT", "SHARED")
+                and a.evidence_type in PERFORMANCE_TYPES
+                and span
+                and copied_from_ai(
+                    span, request.prior_assistant_texts, request.copy_guard_min_chars
+                )
+            ):
+                raise ValueError(
+                    f"skill {a.skill_id}: student_evidence_span quotes text the assistant "
+                    "already wrote earlier in this conversation (see Reused assistant "
+                    "text), so it is not the learner's own work. Quote the learner's own "
+                    "contribution instead (e.g. their explanation, with the evidence type "
+                    "it shows), or use actor AI with OBSERVATION if they added nothing."
+                )
 
     try:
         result = gateway.generate_structured(

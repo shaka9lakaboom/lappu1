@@ -92,6 +92,8 @@ def run_evidence_stage(
             course_context=text.course_context,
             skills=segment.skills,
             reused_ai_text=reused,
+            prior_assistant_texts=tuple(prior_assistant),
+            copy_guard_min_chars=policy.attribution.copy_guard_min_chars,
         )
         result = attribute_segment(gateway, request, context)
         qualifications: dict[str, Qualification] = {}

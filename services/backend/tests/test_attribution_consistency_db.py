@@ -11,6 +11,11 @@ explanation was lost because the attributor was never told which text was reused
 Every case runs the production pipeline (scripted model outputs) and then reads the SAME mapped
 skill back through GET /v1/activity and GET /v1/skills/{id}: the activity actor, the evidence
 actor and the skill timeline actor must be one value. Synthetic text only.
+
+On the critical gate, gemini-3.5-flash-lite still quoted the reused loop under the v2 prompt, so
+the attribution validator now refuses a learner span the copy guard would reclassify (one
+repair). The copy guard stays as the safety net; the rows it wrote before - the hosted one - are
+covered by the pre-validator case.
 """
 
 from uuid import UUID
@@ -197,22 +202,109 @@ def test_reused_ai_code_with_an_own_explanation_is_credited_as_the_explanation(
     assert view["recommendation"] != "VERIFY"
 
 
-def test_reused_ai_code_cited_as_own_is_the_ai_s_and_never_a_second_delegation(
+CITES_CODE = {"student_span": CODE, "reason_code": "STUDENT_WROTE_CODE"}
+CITES_EXPLANATION = {
+    "student_span": EXPLANATION,
+    "evidence_type": "INDEPENDENT_EXPLANATION",
+    "reason_code": "STUDENT_EXPLAINED_REASONING",
+}
+
+
+def test_reused_ai_code_cited_as_own_is_repaired_to_the_learner_s_explanation(
     db_pool, registry, new_learner, client, make_token
 ) -> None:
-    """The live shape as the v1 attributor answered it (STUDENT, the reused code as the span).
-    The copy guard records the AI's work - shown consistently as AI, with the reason - and it is
-    not counted again as a delegation: no debt from one AI answer, no VERIFY."""
+    """The live shape as gemini-3.5-flash-lite answered it on the critical gate (skill-attribution
+    v2 still quoting the reused loop): the validator refuses the span the copy guard would
+    reclassify, and the single repair quotes the learner's own explanation."""
     learner = new_learner()
     bootstrapped_course(db_pool, learner, registry)
-    ask_how_to(db_pool, learner, "reused-cited")
+    ask_how_to(db_pool, learner, "reused-repaired")
+    provider, anchor = run_turn(
+        db_pool,
+        learner,
+        OWN_WORK,
+        CONFIRMATION,
+        [attribute_all(**CITES_CODE), attribute_all(**CITES_EXPLANATION)],
+        conversation="reused-repaired",
+        index=2,
+    )
+    repair = provider.calls[-1]["messages"][-1].content
+    assert "quotes text the assistant already wrote earlier" in repair
+    skill = skill_id(db_pool, registry, LOOP_SKILL)
+    view = chain(db_pool, client, make_token(learner), learner, anchor, skill)
+    assert assert_one_actor(view) == "STUDENT" == view["attributed"]
+    ((_, _, etype, reason, strength),) = view["evidence"]
+    assert (etype, reason) == ("INDEPENDENT_EXPLANATION", "QUALIFIED") and strength > 0
+    state, alpha, eligible, score, delegations = view["ledger"]
+    assert alpha > 1.0 and (eligible, score, delegations) == (False, 0.0, 1)
+    assert view["recommendation"] != "VERIFY"
+
+
+def test_reused_ai_code_insisted_on_abstains_and_is_never_a_delegation(
+    db_pool, registry, new_learner, client, make_token
+) -> None:
+    learner = new_learner()
+    bootstrapped_course(db_pool, learner, registry)
+    ask_how_to(db_pool, learner, "reused-insisted")
+    provider, anchor = run_turn(
+        db_pool,
+        learner,
+        OWN_WORK,
+        CONFIRMATION,
+        [attribute_all(**CITES_CODE), attribute_all(**CITES_CODE)],
+        conversation="reused-insisted",
+        index=2,
+    )
+    assert fetch(
+        db_pool,
+        "select a.status::text, a.evidence_decision from public.attributions a "
+        "join public.activity_segments s on s.id = a.segment_id where s.anchor_message_id = %s",
+        anchor,
+    ) == [("ABSTAINED", "MODEL_OUTPUT_INVALID")]
+    assert (
+        fetch(
+            db_pool,
+            "select count(*) from public.evidence_events e join public.activity_segments s "
+            "on s.id = e.segment_id where s.anchor_message_id = %s",
+            anchor,
+        )[0][0]
+        == 0
+    )
+    skill = skill_id(db_pool, registry, LOOP_SKILL)
+    items = client.get("/v1/activity?limit=50", headers=auth(make_token(learner))).json()["items"]
+    (row,) = [i for i in items if i["id"] == str(anchor)]
+    (chip,) = [m for seg in row["segments"] for m in seg["mappings"] if m["skill_id"] == str(skill)]
+    # Nothing was recorded, so the chip names no actor (never the attributor's claim).
+    assert (chip["actor"], chip["evidence_id"]) == (None, None)
+    ledger = fetch(
+        db_pool,
+        "select debt_eligible, debt_score, recent_delegation_count from public.skill_ledger "
+        "where learner_id = %s and skill_id = %s",
+        learner,
+        skill,
+    )[0]
+    assert ledger == (False, 0.0, 1)
+
+
+def test_a_pre_validator_copied_from_ai_row_is_the_ai_s_and_never_a_second_delegation(
+    db_pool, registry, new_learner, client, make_token, monkeypatch
+) -> None:
+    """Rows written before the validator existed - like the hosted one - carry COPIED_FROM_AI
+    evidence (the attributor's STUDENT claim reclassified by the copy guard). They are shown as
+    the AI's everywhere, with the reason, and they are not a second delegation."""
+    from app.intelligence.attribution import engine as attribution_engine
+
+    monkeypatch.setattr(attribution_engine, "copied_from_ai", lambda *args: False)
+    learner = new_learner()
+    bootstrapped_course(db_pool, learner, registry)
+    ask_how_to(db_pool, learner, "reused-historic")
     _, anchor = run_turn(
         db_pool,
         learner,
         OWN_WORK,
         CONFIRMATION,
-        attribute_all(student_span=CODE, reason_code="STUDENT_WROTE_CODE"),
-        conversation="reused-cited",
+        attribute_all(**CITES_CODE),
+        conversation="reused-historic",
         index=2,
     )
     skill = skill_id(db_pool, registry, LOOP_SKILL)

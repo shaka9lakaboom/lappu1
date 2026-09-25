@@ -53,6 +53,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from collections import Counter
 from dataclasses import asdict, dataclass, field
@@ -424,7 +425,15 @@ class ScriptedModel:
         import re
 
         listed = re.findall(r"id=([0-9a-f-]{36})", messages[0].content)
-        specs = self.script.get("attribution", {})
+        # A sequence answers successive calls (e.g. an output the validator refuses, then its
+        # repair); the last one repeats.
+        sequence = self.script.get("attribution_sequence")
+        if sequence:
+            calls = self._queues.setdefault("_attribution_calls", [0])
+            specs = sequence[min(calls[0], len(sequence) - 1)]
+            calls[0] += 1
+        else:
+            specs = self.script.get("attribution", {})
         by_id = {self._id(k): v for k, v in specs.items()}
         items = []
         for skill_id in listed:
@@ -1083,6 +1092,7 @@ def score_grading(case: dict[str, Any], run: CaseRun, gateway, provider, policy)
     expect = case["expect"]
     grading = policy.verification.grading
     grade = None
+    run.metrics["deterministic_item"] = grader != "RUBRIC_AI" and "validate_band" not in case
     if "validate_band" in case:
         # Delivery gate: an item outside the planned band is rejected before any learner sees it,
         # so it can never produce (full) negative evidence.
@@ -1204,7 +1214,7 @@ class Report:
             gates[name] = {"value": value, "threshold": 0, "pass": value == 0}
         accuracy = sum(graded) / len(graded) if graded else 1.0
         # Applies when grading cases ran (a subset without GRD has nothing to measure).
-        expected = any(r.family == "GRD" and not r.blocked for r in self.runs)
+        expected = any(r.metrics.get("deterministic_item") for r in self.runs)
         gates["deterministic_grader_accuracy"] = {
             "value": accuracy,
             "threshold": 1.0,
@@ -1413,6 +1423,16 @@ def run_gate(
         provider = CountingProvider(recorder_provider)
         generation_model, embedding_model, provider_name = model, EMBEDDING_MODEL, "google"
 
+    if mode == "live":
+        typical, worst = planned_requests(cases)
+        if max_requests <= 0:
+            raise SystemExit("live mode needs --max-requests: what is left of today's quota")
+        if typical > max_requests:
+            raise SystemExit(
+                f"planned ~{typical} generation requests (worst {worst}) exceed --max-requests "
+                f"{max_requests}; narrow the run with --only or wait for the quota reset"
+            )
+        print(f"live budget: ~{typical} typical / {worst} worst requests, cap {max_requests}")
     pool = None
     if any(c["kind"] == "turn" for c in cases):
         if not database_url:
@@ -1452,47 +1472,41 @@ def run_gate(
         for case in cases:
             run = CaseRun(case["id"], case["family"], case["kind"], case.get("source"))
             runs.append(run)
-            if (
-                mode == "live"
-                and max_requests
-                and provider.requests + _estimate(case) > max_requests
-            ):
+            generation = provider.requests - provider.embeddings
+            if mode == "live" and generation + _estimate(case, worst=True) > max_requests:
+                # Never start a case the remaining budget cannot finish: it is BLOCKED, not failed.
                 run.blocked = True
                 run.error = "request cap reached before this case"
                 continue
-            try:
-                if case["kind"] == "evidence":
-                    score_evidence(case, run, policy)
-                elif case["kind"] == "turn":
-                    use = (
-                        "compromised"
-                        if (
-                            mode == "deterministic"
-                            and any("compromised" in t for t in case["turns"])
-                        )
-                        else ("ideal" if mode == "deterministic" else None)
-                    )
-                    out = gate_db.run_turn_case(
+            for attempt in range(1, LIVE_RETRIES + 2):
+                run.hard, run.soft, run.metrics, run.detail = [], [], {}, {}
+                try:
+                    run_case(
+                        case,
+                        run,
+                        mode,
                         pool,
                         gateway,
                         provider,
-                        case,
                         fixtures,
+                        spec_names,
                         policy,
-                        use_script=use,
-                        learners=learners,
+                        learners,
                     )
-                    score_turn(case, run, out, fixtures, spec_names)
-                elif case["kind"] == "verification":
-                    score_verification(case, run, gateway, provider, fixtures.spec, policy)
-                else:
-                    score_grading(case, run, gateway, provider, policy)
-            except Exception as exc:  # noqa: BLE001 - reported per case, never a silent pass
-                run.error = f"{type(exc).__name__}: {exc}"[:500]
-                misses = getattr(getattr(provider, "_provider", None), "misses", None)
-                if misses:
-                    run.error = f"stale recording ({len(misses)} miss(es)): {run.error}"
-                    misses.clear()
+                    run.error = None
+                    break
+                except Exception as exc:  # noqa: BLE001 - reported per case, never a silent pass
+                    run.error = f"{type(exc).__name__}: {exc}"[:500]
+                    misses = getattr(getattr(provider, "_provider", None), "misses", None)
+                    if misses:
+                        run.error = f"stale recording ({len(misses)} miss(es)): {run.error}"
+                        misses.clear()
+                        break
+                    if mode != "live" or attempt > LIVE_RETRIES or not _retryable(exc):
+                        break
+                    # Provider backpressure / timeout: wait, then run the case again (its finished
+                    # model calls are cache hits, so a retry repeats only what failed).
+                    time.sleep(min(max(getattr(exc, "retry_after", None) or 0, 15 * attempt), 60))
             run.passed = run.error is None and not run.hard and (mode == "live" or not run.soft)
     finally:
         if recorder_provider is not None and recorder_provider.entries:
@@ -1520,6 +1534,35 @@ def run_gate(
     )
 
 
+LIVE_RETRIES = 2
+
+
+def _retryable(exc: Exception) -> bool:
+    from app.model_gateway import ModelGatewayError, ModelTimeoutError
+
+    return isinstance(exc, ModelGatewayError) and (
+        exc.transient or isinstance(exc, ModelTimeoutError) or "HTTP_5" in str(exc)
+    )
+
+
+def run_case(case, run, mode, pool, gateway, provider, fixtures, spec_names, policy, learners):
+    import gate_db
+
+    if case["kind"] == "evidence":
+        score_evidence(case, run, policy)
+    elif case["kind"] == "turn":
+        compromised = any("compromised" in t for t in case["turns"])
+        use = ("compromised" if compromised else "ideal") if mode == "deterministic" else None
+        out = gate_db.run_turn_case(
+            pool, gateway, provider, case, fixtures, policy, use_script=use, learners=learners
+        )
+        score_turn(case, run, out, fixtures, spec_names)
+    elif case["kind"] == "verification":
+        score_verification(case, run, gateway, provider, fixtures.spec, policy)
+    else:
+        score_grading(case, run, gateway, provider, policy)
+
+
 def _is_uuid(text: str) -> bool:
     try:
         uuid.UUID(text)
@@ -1528,12 +1571,19 @@ def _is_uuid(text: str) -> bool:
         return False
 
 
-def _estimate(case: dict[str, Any]) -> int:
+def _estimate(case: dict[str, Any], *, worst: bool = False) -> int:
+    """Generation requests of a live case: typical, or the worst case (repairs, adjudication,
+    three generation attempts)."""
     if case["kind"] == "turn":
-        return 4 * len(case["turns"])
+        return (4 if worst else 2) * len(case["turns"])
     if case["kind"] == "verification":
-        return 3
-    return 2
+        return 6 if worst else 1
+    return 2 if worst else 1
+
+
+def planned_requests(cases: list[dict[str, Any]]) -> tuple[int, int]:
+    """(typical, worst) generation requests of a live run, the fixture embeddings excluded."""
+    return sum(_estimate(c) for c in cases), sum(_estimate(c, worst=True) for c in cases)
 
 
 def record_run(report: Report, database_url: str) -> str:

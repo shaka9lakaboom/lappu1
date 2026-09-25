@@ -43,7 +43,7 @@ def test_the_hosted_consistency_defect_is_a_gate_case() -> None:
     reused, own = cases["ATT-05"], cases["ATT-09"]
     assert len(reused["turns"]) == 2 and "compromised" in reused["turns"][1]
     assert reused["expect"]["ledger"]["py-for-loops"]["debt_eligible"] is False
-    assert reused["expect_live"]["evidence"]["py-for-loops"]["actor"] == "STUDENT"
+    assert reused["expect"]["evidence"]["py-for-loops"]["actor"] == "STUDENT"
     assert own["expect"]["evidence"]["py-for-loops"]["actor"] == "STUDENT"
     assert "attribution_evidence_inconsistency" in gate.HARD_GATES
 
@@ -73,8 +73,9 @@ def test_the_replay_set_passes_from_the_recording() -> None:
     if not DATABASE_URL:
         pytest.skip("TEST_DATABASE_URL not set")
     recording = gate.RECORDINGS / f"{gate.LIVE_MODEL}.jsonl"
-    if not recording.exists():
-        pytest.skip("no live recording committed yet")
+    # A recording is complete only with its baseline (written by a full live run, H16).
+    if not (recording.exists() and (gate.BASELINES / f"{gate.LIVE_MODEL}.json").exists()):
+        pytest.skip("no complete live recording committed yet")
     report = gate.run_gate("replay", database_url=DATABASE_URL, recording=recording)
     data = report.as_json()
     assert data["verdict"] == "PASS", (data["failing"], data["hard_gates"])

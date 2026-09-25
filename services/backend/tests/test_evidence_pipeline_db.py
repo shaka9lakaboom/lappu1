@@ -346,8 +346,10 @@ def test_invalid_attribution_output_is_repaired_once_then_abstains(
 def test_a_paste_from_an_earlier_reply_outside_the_context_window_is_the_ai_s_work(
     db_pool, registry, new_learner
 ) -> None:
-    """H8 (ADR 0008): the copy guard searches the conversation's earlier assistant messages, not
-    only the 4-message recent context. The pasted code was the AI's, eight messages earlier."""
+    """H8 (ADR 0008): the copy guard's history is the conversation's earlier assistant messages,
+    not only the 4-message recent context. The pasted code was the AI's, eight messages earlier:
+    the attribution request lists it as reused, a span quoting it is refused (one repair), and the
+    repaired answer (the AI's work) is recorded as such."""
     learner = new_learner()
     bootstrapped_course(db_pool, learner, registry)
     conversation = "copy-guard-conversation"
@@ -376,19 +378,31 @@ def test_a_paste_from_an_earlier_reply_outside_the_context_window_is_the_ai_s_wo
     provider = FakeProvider(
         route_responder(
             turn=turn_mapping(pasted, (LOOP_SKILL, 0.91)),
-            attribution=attribute_all(student_span=code),
+            attribution=[
+                attribute_all(student_span=code),
+                attribute_all(
+                    actor="AI",
+                    evidence_type="OBSERVATION",
+                    outcome="NOT_APPLICABLE",
+                    ai_span=code,
+                    reason_code="AI_WROTE_SOLUTION",
+                ),
+            ],
         )
     )
     job = job_for(db_pool, assistant_id, JOB_PROCESS_RAW_MESSAGE)
     assert process_raw_message_job(db_pool, gateway_for(db_pool, provider), job).outcome == (
         "EVIDENCE_RECORDED"
     )
+    first = provider.calls[1]["messages"][0].content
+    assert "Reused assistant text" in first and code.lower() in first
+    assert "quotes text the assistant already wrote" in provider.calls[2]["messages"][-1].content
     assert fetch(
         db_pool,
         "select actor::text, evidence_type::text, strength, qualification_reason, "
         "qualifier_version from public.evidence_events where learner_id = %s",
         learner,
-    ) == [("AI", "OBSERVATION", 0.0, "COPIED_FROM_AI", "evidence/p8-v1")]
+    ) == [("AI", "OBSERVATION", 0.0, "QUALIFIED", "evidence/p8-v1")]
 
 
 def test_replay_never_duplicates_evidence_or_calls(db_pool, registry, new_learner) -> None:
