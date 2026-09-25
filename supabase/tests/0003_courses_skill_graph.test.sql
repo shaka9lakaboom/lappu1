@@ -123,9 +123,9 @@ select ok(
 );
 select is(
     (select count(*)::int from pg_tables where schemaname = 'public' and tablename in (
-        'verification_sessions', 'verification_items', 'verification_results', 'recommendations')),
+        'verification_sessions', 'verification_items', 'verification_results')),
     0,
-    'no verification / recommendation tables exist yet (P5/P6; evidence and ledger are 0005/0006)'
+    'no verification tables exist yet (P6 / 0008; evidence and ledger are 0005/0006, recommendations 0007)'
 );
 select is(
     (select atttypmod from pg_attribute

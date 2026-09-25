@@ -3,7 +3,7 @@
 This record carries live implementation status (architecture §0.1). It must never
 claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisions:
 [`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A, 0004 free-tier ModelGateway,
-0005 P3B + P4).
+0005 P3B + P4, 0006 P5).
 
 **Last updated:** 2026-09-25
 
@@ -25,25 +25,67 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 | Field | Value |
 | --- | --- |
 | Repository | https://github.com/shaka9lakaboom/lappu1 |
-| Default branch | `main`. P0, P1 and P2 + P3A are merged. **`main` = `08260a397fb5b41d709b3c4074836cc7e21646da`** (merge of PR #3). |
+| Default branch | `main`. P0, P1, P2 + P3A and P3B + P4 are merged. **`main` = `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8`** (merge of PR #4). |
 | P1 merge commit | `5ee62d01cb40ffac3dbf9342456935092a944098` (PR #2) |
 | P2 + P3A merge commit | `08260a397fb5b41d709b3c4074836cc7e21646da` (PR #3; its head `09386c2` had 7/7 CI jobs green before the merge) |
-| Development branch | `skillmirror-p3b-p4-evidence-mastery-debt` (P3B + P4, from `08260a3`) |
-| Previous branch | `skillmirror-p2-p3a-intelligence-foundation` |
-| P3B + P4 commits | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
+| P3B + P4 merge commit | `ab2d73d6e43f3c0122a08506ffedcd62c5ff19a8` (PR #4, head `c7aba9a`) |
+| Development branch | `skillmirror-p5-student-experience` (P5, from `ab2d73d`) |
+| Previous branch | `skillmirror-p3b-p4-evidence-mastery-debt` (merged in PR #4) |
+| P3B + P4 commits (merged) | migrations 0005 + 0006 · P3B attribution + evidence qualification · P4 mastery + debt + ledger · pipeline stage + `GET /v1/ledger` · contracts · safety benchmark · ADR 0005 + acceptance script · evidence sources fix (`1352b5b`) · day-granular recency + this record |
 | P2 + P3A branch started from `main` | `5ee62d01cb40ffac3dbf9342456935092a944098` |
 | P2 + P3A commits (merged) | `508ec0b` migration 0003 · `76483c8` model_runs FK-null fix · `f160a32` ModelGateway + policy · `9550838` courses API + skill graph · `f6fb81b` P3A pipeline + worker · `41472e3` contracts · `a9d7720` web course flow · `07a4a10` benchmark smoke set · `c723960` ADR 0003 + CI + env · `2801ed4` format fix · `5ddd71c` provider-schema allowlist · `bb2448f` state + acceptance script · `20dbd77` live Gemini fixes (schema limits, quotas, overload) · `19bd72f` partial live acceptance record · then the ADR 0004 series: migration 0004 · free-tier ModelGateway + combined turn analysis · ADR 0004 + this record |
-| CI (P3B + P4) | run on the pushed branch head; result recorded in the pull request |
+| CI (P3B + P4) | green on the PR #4 head before the merge |
 | CI (P2 + P3A) | green on `2801ed4` ([36071071084](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071071084)) and `bb2448f` ([36071473581](https://github.com/shaka9lakaboom/lappu1/actions/runs/36071473581)), 7/7 jobs each. The ADR 0004 series is checked in the pull request (not yet run when this record was written). |
-| Pull request | P3B + P4 → `main`: opened after CI is green; **not merged** by the agent. P2 + P3A: PR #3, **merged** as `08260a3` |
+| Pull request | P5 → `main`: opened after CI is green; **not merged** by the agent. P3B + P4: PR #4, **merged** as `ab2d73d`. P2 + P3A: PR #3, **merged** as `08260a3` |
 
 ## Phase
 
-**Current phase: P3B — Attribution + EvidenceEvents and P4 — Mastery + Evidence Ledger + AI
-Assistance Debt.** Decisions: [ADR 0005](decisions/0005-p3b-p4-evidence-mastery-debt.md).
-**Status: COMPLETE. MIGRATIONS 0001–0006 ON HOSTED (0005 + 0006 pushed 2026-09-25 with the
-owner's approval). The real P3B/P4 acceptance PASSED on `gemini-3.5-flash-lite` (the hackathon
-operational runtime): 1 `TURN_ANALYSIS` + 1 `SKILL_ATTRIBUTION` + 1 embedding.**
+**Current phase: P5 — Complete Student Experience** (dashboard, Skill Map, Skill Detail with
+"Why?", enriched Activity, corrections, deterministic recommendations). Branch
+`skillmirror-p5-student-experience` from `main` `ab2d73d`. Decisions:
+[ADR 0006](decisions/0006-p5-student-experience.md).
+**Status: COMPLETE. MIGRATIONS 0001–0007 ON HOSTED (0007 pushed 2026-09-25 with the owner's
+approval, verified read-only). The local acceptance and the hosted acceptance PASSED with 0
+generation and 0 embedding requests.** P6 verification will be **0008**; nothing in P6 was started.
+
+```
+GET /v1/ledger · GET /v1/skills/{id} · GET /v1/activity · GET /v1/recommendations  (read, explain)
+POST /v1/feedback: DONT_COUNT / WRONG_SKILL -> one-way evidence exclusion -> ledger recompute
+                   -> recommendation refresh (one transaction); EVALUATION -> stored only
+```
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| Migration 0007 applies from a clean reset | PASS (local) | `supabase db reset`: 0001–0007 applied |
+| pgTAP 0007 (RLS, own rows, no cross-learner access, idempotency, recommendation uniqueness/states, one-way exclusion) | PASS: 49 | `supabase/tests/0007_student_experience.test.sql`; total 209 |
+| 0001–0006 unchanged | PASS | Git blob ids equal `main` `ab2d73d` (`test_migrations_frozen.py`); hosted list 0001–0006 |
+| Every meaningful state explained | PASS (tests + local acceptance) | Explanation codes + gates + evidence timeline; `test_experience_db.py`, acceptance check 4 |
+| UNKNOWN is never weak / never 0% | PASS | No-row skill → UNKNOWN, null mean, NO_EVIDENCE; neutral "Not enough activity yet"; UNKNOWN never PRACTICE/PREREQUISITE (engine + DB check) |
+| Evidence traces to the captured activity | PASS | Acceptance check 5: 13/13 events → raw messages → activity chips |
+| Debt explained as a reliance signal | PASS | Band + factors; NONE → "There is not enough repeated AI delegation here to infer reliance."; score only in internal detail |
+| DONT_COUNT: exclude → recompute → refresh | PASS | DEMONSTRATED → DEVELOPING, `ledger_version` +1, NO_ACTION → PRACTICE; provenance counts unchanged |
+| WRONG_SKILL: exclude, provenance kept, no invented skill | PASS | 13 mappings / 13 evidence rows unchanged; debt 20 → 16 → not eligible; VERIFY → NO_ACTION |
+| EVALUATION never changes evidence | PASS | DB check + test |
+| Idempotent feedback | PASS | Replay 200 same id; repeat under a new key → same correction; key reuse → 409 |
+| Corrections hold for later evidence | PASS | Deferred job's evidence born excluded (pgTAP + DB test) |
+| Recommendations deterministic | PASS | Rebuild from scratch = same queue; refresh with unchanged ledger writes nothing; random-ledger invariants |
+| Learner scoping (not RLS alone) | PASS | Every service filters by the JWT learner; foreign skill/target → 404 |
+| Zero model calls | PASS | P5 modules never load the ModelGateway (fresh interpreter); `model_runs` unchanged in DB tests and acceptance (347 → 347) |
+| Web: dashboard, Skill Map, Skill Detail, Why?, Activity corrections, course selector, loading/empty/error | PASS | vitest 63; local browser walkthrough (`e2e/p5-acceptance.spec.ts`) passed |
+| Local P5 acceptance | **PASS** (10/10 API checks + browser walkthrough) | See *Local acceptance P5* |
+| Hosted migration 0007 | **PASS**: pushed with the owner's approval; catalog, RLS, grants, constraints, indexes and policy verified | See *Database* |
+| Hosted acceptance (existing course graph, disposable learner, no model call) | **PASS**: 12/12 + browser walkthrough; learner deleted through the Auth cascade | See *Hosted acceptance P5* |
+| Real P3B/P4 learner untouched | PASS | Row hash `07a84e5a…` identical before, after verify and after cleanup; its P5 view read in a rolled-back transaction (0 rows written) |
+| CI + pull request | on the pushed branch head; the PR is opened after CI is green and not merged by the agent | — |
+
+### Previous phase: P3B + P4 (merged in PR #4)
+
+**P3B — Attribution + EvidenceEvents and P4 — Mastery + Evidence Ledger + AI Assistance Debt.**
+Decisions: [ADR 0005](decisions/0005-p3b-p4-evidence-mastery-debt.md).
+**Status: COMPLETE and MERGED (PR #4, `ab2d73d`). MIGRATIONS 0001–0006 ON HOSTED (0005 + 0006
+pushed 2026-09-25 with the owner's approval). The real P3B/P4 acceptance PASSED on
+`gemini-3.5-flash-lite` (the hackathon operational runtime): 1 `TURN_ANALYSIS` + 1
+`SKILL_ATTRIBUTION` + 1 embedding.**
 
 ```
 raw turn → P3A mapping (unchanged) → per MAPPED segment ONE SKILL_ATTRIBUTION call
@@ -150,7 +192,24 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 
 ## Database
 
-- Latest migration: **`0006_mastery_debt.sql`** (ADR 0005).
+- Latest migration: **`0007_student_experience.sql`** (ADR 0006), **on hosted since 2026-09-25**:
+  - enums `feedback_action` (WRONG_SKILL, DONT_COUNT, EVALUATION), `feedback_target_type`
+    (EVIDENCE_EVENT, SKILL_MAPPING, ACTIVITY_SEGMENT, SKILL, RECOMMENDATION), `feedback_verdict`,
+    `recommendation_type` (NO_ACTION, PRACTICE, VERIFY, PREREQUISITE, REVERIFY),
+    `recommendation_state` (ACTIVE, SUPERSEDED, COMPLETED, DISMISSED)
+  - `feedback`: append-only. The guard resolves skill/mapping/segment from the learner's own
+    target and re-checks the recorded exclusions. Idempotency: `(user_id, client_request_id)`
+    plus one DONT_COUNT/WRONG_SKILL per target. Evaluations never change evidence.
+  - `recommendations`: a rebuildable queue with one ACTIVE row per learner and skill. A changed
+    action supersedes the row; resolved rows are immutable; UNKNOWN never gets PRACTICE or
+    PREREQUISITE.
+  - trigger `evidence_events_apply_corrections`: captured-activity evidence of a corrected
+    mapping or task unit is inserted already excluded (the 0005 update guard is untouched)
+  - policy key `recommendations` (max 2 active verifications, EMERGING prerequisite gap, debt
+    bands 15/25)
+  - RLS on both tables; learners SELECT their own rows; no client writes; the trigger functions
+    are not executable by clients.
+- Previous: **`0006_mastery_debt.sql`** (ADR 0005).
   - **`0005_attribution_evidence.sql`**:
     - enums `evidence_actor`, `evidence_type`, `outcome_signal`, `evidence_source_type`,
       `attribution_status`
@@ -183,15 +242,38 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - qualification floors 0.60
   - processing unit: 4 context messages, 120 s pairing window
   - skill graph 30–60 skills (hard 20–80), default importance 0.5
-- pgTAP: `0001` (13), `0002` (33), `0003` (49), `0004` (10), `0005` (40), `0006` (15) = **160**.
+- pgTAP: `0001` (13), `0002` (33), `0003` (49), `0004` (10), `0005` (40), `0006` (15), `0007` (49) = **209**.
 - **`0004_model_gateway_cache.sql` (ADR 0004)** is additive:
   - `model_runs.cache_key` and `model_runs.cache_source_run_id`, both nullable
   - two checks on those columns: a cache key only on `SUCCEEDED` rows; a cache hit is a
     first-attempt success
   - a cache lookup index and a provider-request (budget) index
 - **Migration numbering:** `0004` is the free-tier ModelGateway/cache optimisation; P3B is
-  `0005` and P4 is `0006`. P5+ continue from `0007`.
-- Hosted: **`0001`–`0006` applied.**
+  `0005` and P4 is `0006`. **P5 (feedback + recommendations) is `0007`; P6 verification is
+  `0008`.**
+- Hosted: **`0001`–`0007` applied.**
+  - **Migration 0007** was pushed on 2026-09-25 with the owner's explicit approval.
+    - Before the push:
+      - the final dry run listed only `0007_student_experience.sql`
+      - 0001–0006 had the git blob ids of `main` `ab2d73d`
+      - the linked ref `lrjoexzlcadfoyciydkn` was unchanged and equal to the backend
+        `SUPABASE_URL`, `DATABASE_URL` and the web `NEXT_PUBLIC_SUPABASE_URL`
+    - Verified after the push (read-only, a `READ ONLY` transaction):
+      - `migration list --linked`: local = remote for 0001–0007
+      - `feedback` and `recommendations` exist with RLS on; RLS is on for every public table
+      - the 5 enums have the contract labels
+      - triggers `feedback_guard`, `feedback_append_only`, `recommendations_guard_update` and
+        `evidence_events_apply_corrections` (it fires before `evidence_events_guard`)
+      - the 3 new functions cannot be executed by `anon`/`authenticated`
+      - grants: `authenticated` SELECT only on both tables; `anon` nothing
+      - policies `feedback_select_own` (`auth.uid() = user_id`) and `recommendations_select_own`
+        (`auth.uid() = learner_id`)
+      - the unique `feedback_request_key (user_id, client_request_id)`, the partial unique
+        `feedback_one_correction_key` and `recommendations_one_active_key`, and all 12 P5 checks
+      - `policy_config.recommendations` = `{max_active_verify: 2, prerequisite_gap_states:
+        [EMERGING], debt_bands: {moderate_min: 15, high_min: 25}}`; 10 policy keys in total
+      - the existing evidence (1 row) and ledger (1 row) intact
+    - Security advisors: still only the pre-existing Auth WARN.
   - **Migrations 0005 + 0006** were pushed together on 2026-09-25 with the owner's approval.
     - Before the push:
       - the linked ref matched the backend `SUPABASE_URL`, `DATABASE_URL` and the web
@@ -259,6 +341,106 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 | Request budget | `MODEL_DAILY_REQUEST_LIMITS=gemini-3.7-flash=20,gemini-3.8-flash=20`, `MODEL_QUOTA_RESERVE=2`, quota day midnight Pacific; deferral outcome `MODEL_BUDGET_RESERVE` |
 | Result cache | exact key (provider, model, task, prompt version, input hash); memory + durable (`model_runs`) for structured output, memory for query vectors; hits logged with `cache_source_run_id` |
 | Job types | `BOOTSTRAP_COURSE_GRAPH`, `PROCESS_RAW_MESSAGE` |
+| P5 versions (no model call) | recommendations `recommendations/p5-v1` (Engine 16: REVERIFY → VERIFY (actionable debt, max 2 active) → PREREQUISITE (EMERGING prerequisite) → PRACTICE → NO_ACTION); explanation codes + gates; debt bands NONE/LOW/MODERATE/HIGH at 15/25 |
+
+## Hosted acceptance P5 (2026-09-25): PASS, no model call
+
+Local FastAPI :8001 → hosted Supabase (0001–0007), started from `services/backend/.env` with
+`GEMINI_API_KEY=` (empty) and `WORKER_ENABLED=false`, so no ModelGateway or worker existed.
+Local Next.js :3001 → hosted Supabase Auth + that backend. Script:
+`services/backend/scripts/acceptance_p5_hosted.py` (`prepare`, the browser walkthrough,
+`verify`, `cleanup`). Evidence: `test-results/p5-hosted/` (git-ignored; ids only; the cleanup
+deleted the credentials file).
+
+- **No new global rows.** The deterministic fixture reused five existing canonical skills of
+  course `9440004a-a25e-4e15-94c0-17c21f6bd695`, whose real graph has exactly the edges the
+  fixture needs:
+  - DEMONSTRATED: *Writing for loops over sequences*
+  - UNKNOWN, no ledger row: *Writing while loops*
+  - debt-eligible: *Using list comprehensions*
+  - EMERGING prerequisite: *Assigning variables and data types* → prerequisite of → DEVELOPING
+    *Creating and indexing lists*
+
+  Registry and course overlay (nodes / edges / aliases / course skills) stayed 29 / 66 / 77 / 29
+  throughout.
+- **One disposable learner**, signed up through hosted Auth (real JWT). Only learner-owned rows
+  were written: a STUDENT membership, 13 turns (26 raw messages, segments, decisions, mappings,
+  attributions, evidence), jobs, ledger, feedback, recommendations. It was deleted at the end
+  through the Auth admin API; the cascade left 0 rows in every learner-owned table, 0
+  memberships, 0 profile.
+- **The real P3B/P4 learner** (`97d8e181…`) was only read.
+  - Its P5 view ran inside a rolled-back transaction: 24 skills, the loop skill UNKNOWN
+    (`NOT_ENOUGH_SUPPORT`, support 0.7875), 1 evidence event traced to its 2 raw messages,
+    recommendation NO_ACTION, 0 rows written.
+  - A hash of all its rows was identical before, after verify and after cleanup.
+
+| # | Check (hosted) | Result |
+| --- | --- | --- |
+| 1 | Dashboard state counts | DEMONSTRATED 1 · DEVELOPING 1 · EMERGING 1 · UNKNOWN 21 (24 course skills) |
+| 2 | UNKNOWN remains neutral | 21 UNKNOWN with a null mean; only the delegated skill has a ledger row; debt band NONE except the eligible one; neutral tile and badge in the UI |
+| 3 | Skill map overlays ledger state | all 24 graph skills carry a state; the 5 roles as expected; UI: 5 topics, 24 rows |
+| 4 | Skill detail + Why? provenance | all states explained; 4/4 gates; 13/13 events traced to raw messages and activity chips; 90% / 95% confidences; no prompt or policy snapshot |
+| 5 | Debt explanation | HIGH (importance 0.8), 5 factors, ELIGIBLE, UNVERIFIED; the others NONE; the score only in internal detail |
+| 6 | Activity enrichment | 26 rows, 13 anchors (MAP/MAPPED), actors AI + STUDENT, types OBSERVATION + INDEPENDENT_APPLICATION, 1 excluded |
+| 7 | DONT_COUNT (in the browser) | feedback stored; evidence excluded (`LEARNER_DONT_COUNT`); DEMONSTRATED → DEVELOPING; `ledger_version` 2 → 3 |
+| 8 | WRONG_SKILL (in the browser) | feedback stored on the mapping; evidence excluded (`LEARNER_WRONG_SKILL`); mapping still ACCEPTED; provenance 26/13/13/13/13/13 unchanged |
+| 9 | Recommendations refresh deterministically | the same queue on repeat: VERIFY 65 → PREREQUISITE 59 → PRACTICE 49 → PRACTICE 39; after a third WRONG_SKILL the debt is no longer eligible and VERIFY → NO_ACTION |
+| 10 | Retrying feedback is idempotent | replay 200 with the same id; same target under a new key 200 with the same id; key reuse with another body 409; feedback rows unchanged |
+| 11 | Zero generation calls | `model_runs` generation 27 → 27 |
+| 12 | Zero embedding calls | `model_runs` embedding 7 → 7 |
+
+**Browser walkthrough (hosted):** 1 passed (38 s).
+- The first attempt timed out on a cold dev-compiled page (5.6 s against the default 5 s), before
+  any correction. The spec now waits up to 30 s.
+- The final dashboard screenshot of that run caught a transient loading skeleton, after its
+  assertions had passed. The spec now waits it out.
+
+## Local acceptance P5 (2026-09-25): PASS, no model call
+
+Full local stack: local Supabase (Auth + Postgres, migrations 0001–0007) → local FastAPI :8001
+**without `GEMINI_API_KEY`** (no ModelGateway, no worker) → local Next.js :3001. Script:
+`services/backend/scripts/acceptance_p5.py`; browser walkthrough: `apps/web/e2e/p5-acceptance.spec.ts`.
+Evidence: `test-results/p5-acceptance/evidence.json` + 8 screenshots (git-ignored; ids only).
+
+Two fresh learners were signed up through Supabase Auth (real JWTs) and seeded with the
+deterministic P5 fixtures (`services/backend/tests/p5_fixtures.py`). The fixtures run the
+production evidence qualification, persistence, ledger and recommendation code; no model run
+exists for them. Each learner has one course and 5 skills in 2 topics:
+
+- for loops: DEMONSTRATED, 4 independent applications, plus 1 excluded by DONT_COUNT
+- while loops: UNKNOWN, no ledger row
+- comprehensions: UNKNOWN, debt eligible (3 AI delegations, MODERATE ≈ 20)
+- variables: EMERGING
+- indexing: DEVELOPING, with an EMERGING prerequisite
+
+**API checks (learner A, over HTTP):**
+
+| # | Check | Result |
+| --- | --- | --- |
+| 1 | Dashboard counts | DEMONSTRATED 1 · DEVELOPING 1 · EMERGING 1 · UNKNOWN 2 |
+| 2 | UNKNOWN neutral | null mean for both; the row-less skill has no ledger version |
+| 3 | Skill map overlay | all 5 assessable graph skills carry a state; the row-less skill is UNKNOWN |
+| 4 | Every state explained | INDEPENDENT_EVIDENCE_SUPPORTS / NO_EVIDENCE / NO_INDEPENDENT_PERFORMANCE / EARLY_DIFFICULTY / MIXED_RESULTS, with NO_ACTION / NO_ACTION / VERIFY / PRACTICE / PREREQUISITE; no prompt or policy snapshot in any response |
+| 5 | Evidence traces to activity | 13/13 events → their raw messages → the activity chip with the same evidence id |
+| 6 | Debt without moral judgement | MODERATE with 5 factors; the other skills NONE; no judgemental wording |
+| 7 | DONT_COUNT | 201; DEMONSTRATED → DEVELOPING; `ledger_version` 2 → 3; replay 200 with the same feedback id |
+| 8 | WRONG_SKILL | 201; 1 evidence excluded; raw/segments/decisions/mappings/attributions/evidence 26/13/13/13/13/13 before and after |
+| 9 | Recommendations deterministic | queue VERIFY → PREREQUISITE → PRACTICE → PRACTICE, identical on repeat; after a second WRONG_SKILL the debt is no longer eligible and VERIFY → NO_ACTION |
+| 10 | No model request | `model_runs` 347 → 347 |
+
+**Browser walkthrough (learner B):**
+1. Sign-in, then the dashboard: counts, neutral UNKNOWN tile first, VERIFY first in the queue.
+2. Skill Map: 2 topics, 5 skills; the row-less skill shows "Not enough activity yet", neutral tone.
+3. Skill Detail with the mastery "Why?" (4 gates met), then an evidence "Why?" (span, 90% / 95%,
+   `STUDENT_WROTE_CODE`).
+4. Source activity (the focused rows).
+5. Debt panel: "Moderate reliance signal", 5 factors, the score hidden in internal detail.
+6. "Don't count this": the mastery badge becomes Developing and the recommendation "Build
+   consistency".
+7. "Wrong skill" on an activity chip: marked "Marked wrong skill".
+8. Dashboard again: DEMONSTRATED 0, DEVELOPING 2, 4 recommendations.
+
+Result: **1 passed**.
 
 ## Live acceptance P3B + P4 (2026-09-25): PASS on `gemini-3.5-flash-lite`
 
@@ -441,8 +623,8 @@ is deferred.
 
 | Item | Value |
 | --- | --- |
-| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}` added) |
-| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, **`GET /v1/ledger[?course_id=]`** (P4), OpenAPI `/docs` |
+| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}`; **P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections)**) |
+| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, `GET /v1/ledger[?course_id=]` (P4, + `debt_band`), **P5: `GET /v1/skills/{id}`, `GET /v1/activity`, `POST /v1/feedback` (Idempotency-Key), `GET /v1/recommendations`**, OpenAPI `/docs` |
 | Worker | in the API process when `DATABASE_URL` + `GEMINI_API_KEY` are set; or `python -m app.jobs.worker [--once]` |
 | Deployed web / API | none, by decision (local-first) |
 | Extension version | 0.2.0, dev id `cohpimnabjigooghbigblennedbplojm` (unchanged in this phase) |
@@ -453,22 +635,25 @@ is deferred.
 | Suite | Local | CI job |
 | --- | --- | --- |
 | Backend `ruff check` + `ruff format --check` (incl. benchmark runner) | clean | Backend |
-| Backend pytest, unit (no DB) | **481 passed, 84 skipped** (P2+P3A: 307 / 71) | Backend |
-| Backend pytest, with local Postgres | **565 passed** (85 `db`-marked; P2+P3A: 378 / 72) | Backend ingestion + intelligence + database |
-| Database pgTAP (after `supabase db reset`) | **160 passed** (13 + 33 + 49 + 10 + 40 + 15) | Database |
+| Backend pytest, unit (no DB) | **575 passed, 102 skipped** (P3B+P4: 481 / 84) | Backend |
+| Backend pytest, with local Postgres (after `supabase db reset`) | **677 passed** (103 `db`-marked; P3B+P4: 565 / 85) | Backend ingestion + intelligence + database |
+| Database pgTAP (after `supabase db reset`) | **209 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49) | Database |
 | P3B/P4 safety benchmark (`benchmark/runners/p3b_p4_safety.py`, 22 deterministic cases) | **22/22**; False AI Assistance Debt Rate **0/21**; debt recall 2/2 | Backend (`test_benchmark_safety.py`) |
 | Web ESLint | 0 problems | Web |
 | Typecheck (web, contracts, config, ui, extension) | 5/5 clean | Web, Extension |
-| Web vitest | **32 passed** | Web |
+| Web vitest | **63 passed** (P4: 32) | Web |
 | Web production build (no env) | pass | Web |
 | Extension vitest | **78 passed** | Extension |
 | Extension build + manifest validation + Chromium (load ×2, capture → queue → sync ×1) | pass, **3 passed** | Extension |
+| Local P5 acceptance (no model call) | **PASS**: 10/10 API checks + browser walkthrough (1 passed); `model_runs` unchanged | not in CI by design |
+| Hosted P5 acceptance (no model call) | **PASS**: 12/12 + browser walkthrough; disposable learner deleted; real learner untouched; 0 generation / 0 embedding | not in CI by design |
 | Real Gemini acceptance (P3B + P4) | **PASS on `gemini-3.5-flash-lite`**: 1 TURN_ANALYSIS + 1 SKILL_ATTRIBUTION + 1 embedding; replay 0 requests | not in CI by design |
 | Real Gemini acceptance (P2 + P3A) | **PASS end to end on `gemini-3.5-flash-lite`** (3 generation requests; identical repeat 0); `gemini-3.7-flash` pending (503) | not in CI by design |
 | P3A smoke benchmark (`benchmark/runners/p3a_smoke.py`, 12 cases) | live run **deferred**, per the owner (about 12–16 requests in combined mode) | schema + scorer only in CI |
 | Real acceptance script (`services/backend/scripts/acceptance_p2_p3a.py`) | **passed** with `--resume-course`; prints the budget before and after; checks the identical repeat (0 provider requests) | not in CI by design |
 
-New backend test modules (ADR 0005): `test_attribution`, `test_evidence_qualification`, `test_mastery`,
+New backend test modules (ADR 0006): `test_experience_db` (18), `test_recommendations_engine`, `test_zero_model_calls`, `test_migrations_frozen`, the `p5_fixtures` seed; parity extended to the P5 enums and models. Web: `experience.test.ts`, `experience.test.tsx` (server-rendered components).
+ADR 0005 modules: `test_attribution`, `test_evidence_qualification`, `test_mastery`,
 `test_debt`, `test_evidence_pipeline_db`, `test_ledger_api`, `test_benchmark_safety`. The P3A pipeline
 tests run the P3A stage alone (`evidence=False`).
 ADR 0004: `test_model_gateway_free_tier`, `test_turn_analysis`, `test_gateway_db`.
@@ -498,6 +683,22 @@ auth round trip.
 
 ## Known defects and caveats
 
+- **P5, see ADR 0006 *Known limitations*:**
+  - A learner can exclude any of their captured-activity evidence, including unfavourable
+    evidence (the architecture's "don't count this"). Each correction is kept as an append-only
+    feedback row with its effect.
+  - Corrections cannot be undone (one-way by design). WRONG_SKILL does not remap yet, and a
+    recommendation cannot be dismissed yet.
+  - `GET /v1/recommendations` and `GET /v1/skills/{id}` refresh the derived queue before reading
+    (an idempotent cache write in a GET).
+  - The VERIFY cap (2) is concurrent; the daily challenge budget belongs to the P6 planner.
+  - The debt bands (15/25) and factor thirds are engineering defaults (calibration P8).
+  - The local acceptance script creates prefixed registry rows (its fixture builds a graph).
+    Run it on a disposable local database and `supabase db reset` afterwards; otherwise the
+    retrieval DB tests see the extra skills. The hosted script reuses the existing graph and
+    creates none.
+  - The hosted acceptance used deterministic fixtures on the real course graph. No new live
+    ChatGPT turn went through P5 (P5 makes no model call; P3B/P4 already proved the pipeline live).
 - **P3B/P4, see ADR 0005 *Known limitations*:**
   - A ledger row only decays when its skill is recomputed, which happens on new evidence;
     `computed_as_of` shows when.
@@ -549,17 +750,21 @@ auth round trip.
   - **ADR 0005:** no new variable. The hackathon operational runtime sets the existing
     `GEMINI_GENERATION_MODEL` / `GEMINI_ROUTINE_MODEL`, `GEMINI_GENERATION_RPM`,
     `MODEL_DAILY_REQUEST_LIMITS` and `MODEL_QUOTA_RESERVE` in the process environment only.
+  - **ADR 0006 (P5):** no new variable. P5 needs no `GEMINI_API_KEY`. The course selector
+    is a UI cookie (`sm_course`), not configuration.
 - Extension build (optional, public values): `SKILLMIRROR_SUPABASE_URL`, `SKILLMIRROR_SUPABASE_ANON_KEY`,
   `SKILLMIRROR_API_URL`, `SKILLMIRROR_WEB_URL`
 - Tests: `TEST_DATABASE_URL`, `REQUIRE_DB_TESTS`, `UPDATE_GOLDEN`
 
 ## Exact next action
 
-1. **Review and merge the P3B + P4 pull request** (`skillmirror-p3b-p4-evidence-mastery-debt`
-   → `main`) once its CI is green. The agent does not merge it.
-2. **Then P5** (student experience: dashboard, skill detail, explanations) on a new branch from
-   the updated `main`. Its migrations start at `0007`. P5 reads `GET /v1/ledger`; its
-   recommendation surface can use `debt_actionable` and `debt_components`.
+1. **Review and merge the P5 pull request** (`skillmirror-p5-student-experience` → `main`) once
+   its CI is green. The agent does not merge it.
+2. **Then P6: verification**, on a new branch from the updated `main`. Its migration is
+   **`0008`**. P6 turns VERIFY recommendations into challenges, adds the VERIFICATION source to
+   `VERIFICATION_SOURCES`, and relaxes the `skill_ledger_no_verification_states_before_p6`
+   check. The P5 engine already handles VERIFIED / NEEDS_REVERIFICATION / REVERIFY. Nothing in
+   P6 was started.
 3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
    - one live turn in which the learner explicitly delegates a mapped skill (AI-actor
      evidence, single delegation → no debt): about 2 requests

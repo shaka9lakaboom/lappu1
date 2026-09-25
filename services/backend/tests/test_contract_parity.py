@@ -1,4 +1,4 @@
-"""TS contracts (packages/contracts) == Python contracts == database enums (migrations 0003-0006)."""
+"""TS contracts (packages/contracts) == Python contracts == database enums (migrations 0002-0007)."""
 
 import re
 from pathlib import Path
@@ -7,6 +7,7 @@ from typing import get_args
 import pytest
 
 from app.courses import models as course_models
+from app.experience import models as experience
 from app.intelligence import contracts
 from app.model_gateway import ModelRunStatus
 
@@ -42,6 +43,17 @@ PARITY = {
     "ATTRIBUTION_STATUSES": (get_args(contracts.AttributionStatus), "attribution_status"),
     # P4 (migration 0006)
     "MASTERY_STATES": (get_args(contracts.MasteryState), "mastery_state"),
+    # P5 (migration 0007)
+    "FEEDBACK_ACTIONS": (get_args(contracts.FeedbackAction), "feedback_action"),
+    "FEEDBACK_TARGET_TYPES": (get_args(contracts.FeedbackTargetType), "feedback_target_type"),
+    "FEEDBACK_VERDICTS": (get_args(contracts.FeedbackVerdict), "feedback_verdict"),
+    "RECOMMENDATION_TYPES": (get_args(contracts.RecommendationType), "recommendation_type"),
+    "RECOMMENDATION_STATES": (get_args(contracts.RecommendationState), "recommendation_state"),
+    "DEBT_BANDS": (get_args(contracts.DebtBand), None),
+    "JOB_STATES": (get_args(experience.JobState), "job_state"),
+    "FACTOR_LEVELS": (get_args(experience.FactorLevel), None),
+    "DEBT_FACTOR_CODES": (get_args(experience.DebtFactorCode), None),
+    "MASTERY_GATE_CODES": (get_args(experience.MasteryGateCode), None),
 }
 
 # TS interface -> Pydantic model with the same field names.
@@ -51,6 +63,26 @@ MODEL_PARITY = {
     "EvidenceEvent": contracts.EvidenceEvent,
     "SkillLedgerSummary": contracts.SkillLedgerSummary,
     "LedgerResponse": contracts.LedgerResponse,
+    # P5 student experience
+    "Recommendation": experience.Recommendation,
+    "RecommendationsResponse": experience.RecommendationsResponse,
+    "FeedbackRequest": experience.FeedbackRequest,
+    "FeedbackSummary": experience.FeedbackSummary,
+    "FeedbackResponse": experience.FeedbackResponse,
+    "SkillInfo": experience.SkillInfo,
+    "SkillCourseContext": experience.SkillCourseContext,
+    "SkillPrerequisite": experience.SkillPrerequisite,
+    "MasteryGate": experience.MasteryGate,
+    "MasteryExplanation": experience.MasteryExplanation,
+    "DebtFactor": experience.DebtFactor,
+    "DebtExplanation": experience.DebtExplanation,
+    "EvidenceSource": experience.EvidenceSource,
+    "EvidenceTimelineItem": experience.EvidenceTimelineItem,
+    "SkillDetailResponse": experience.SkillDetailResponse,
+    "ActivityMappedSkill": experience.ActivityMappedSkill,
+    "ActivitySegment": experience.ActivitySegment,
+    "ActivityRow": experience.ActivityRow,
+    "ActivityResponse": experience.ActivityResponse,
 }
 
 
@@ -89,6 +121,24 @@ def test_attribution_evidence_types_are_evidence_types_plus_other() -> None:
 @pytest.mark.parametrize("model", [contracts.AttributionItem, contracts.AttributionOutput])
 def test_model_outputs_forbid_extra_fields(model) -> None:
     assert model.model_config.get("extra") == "forbid"
+
+
+def test_feedback_targets_match() -> None:
+    source = (CONTRACTS / "experience.ts").read_text(encoding="utf-8")
+    block = re.search(r"export const FEEDBACK_TARGETS[^=]*= \{(.*?)\};", source, re.S)
+    assert block, "FEEDBACK_TARGETS not found"
+    ts = {
+        action: tuple(re.findall(r"'([^']*)'", body))
+        for action, body in re.findall(r"(\w+): \[(.*?)\]", block.group(1), re.S)
+    }
+    assert ts == experience.FEEDBACK_TARGETS
+    assert set(ts) == set(get_args(contracts.FeedbackAction))
+
+
+def test_ledger_entry_is_the_ledger_summary() -> None:
+    assert contracts.LedgerEntry is contracts.SkillLedgerSummary
+    source = (CONTRACTS / "intelligence.ts").read_text(encoding="utf-8")
+    assert "export type LedgerEntry = SkillLedgerSummary;" in source
 
 
 @pytest.mark.db
