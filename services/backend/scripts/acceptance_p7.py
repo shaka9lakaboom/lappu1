@@ -3,35 +3,40 @@ run in CI). No model call at all.
 
 Targets
     hosted (default)  only after migration 0009 is approved, pushed and verified on hosted. The
-                      source of the fixture skills is the existing course 9440004a: its canonical
-                      skills are REUSED (no new skill_nodes / aliases / edges); the real P3B/P4
-                      learner (that course's owner) is only read, and hashed before and after.
-    --local-graph     a local rehearsal (give it on EVERY phase): the source course is a P5
-                      fixture graph seeded for a throw-away local account (prefixed registry rows:
-                      `supabase db reset` afterwards). The script refuses a target that does not
-                      match SUPABASE_URL.
+                      class is the EXISTING course 9440004a: the fixture students join it with
+                      learner-owned STUDENT memberships and seed learner-owned evidence on five of
+                      its canonical skills. No skill_nodes, aliases, edges, course_skills or
+                      embeddings are created. The real P3B/P4 learner (the course's owner) is only
+                      read - aggregated by the teacher overview, hashed before and after.
+    --local-graph     a local rehearsal (give it on EVERY phase): the class is a P5 fixture graph
+                      seeded for a throw-away local account; cleanup removes its prefixed registry
+                      rows. The script refuses a target that does not match SUPABASE_URL.
+
+The class already has members, so its expected aggregates are its baseline (read before the
+fixture students join, in a READ ONLY transaction) plus the fixture's exact contribution. The
+small group (suppression) is a disposable course with no skills.
 
 Every account is disposable (Auth signup; @mailinator.com on hosted) and deleted at cleanup
-through the Auth admin API (the normal cascade). Learner-owned rows only, plus two synthetic
-skill_candidates (the REJECT path) that cleanup deletes. Audit events are kept: they are the
-record of the admin actions (their actor ids become null when the accounts are deleted).
+through the Auth admin API (the normal cascade removes its memberships, the small course and
+every learner-owned row). Two synthetic skill_candidates, named "ACCEPTANCE TEST ...", exercise
+REJECT (never APPROVE / MERGE) and are deleted at cleanup. Audit events are kept as the record of
+the admin actions (their actor ids become null when the accounts are deleted).
 
-    prepare  snapshot (model runs, registry, real learner); sign up 3 students, a teacher, an
-             outsider teacher and an admin; operator role grants (grant_role.change_role, audited);
-             a disposable 3-student course reusing 5 canonical skills of the source course and a
-             2-student course (suppression); P5 evidence for the students (production code, no
-             model call); memberships through POST /v1/admin/courses/{id}/members; two FAILED
-             jobs and two PENDING candidates (one each for the browser, one each for verify);
-             the walkthrough credentials (git-ignored files)
+    prepare  snapshot; sign up 3 students, a teacher, an outsider teacher and an admin; operator
+             role grants (grant_role.change_role, audited); the teacher enrolled in the class
+             through POST /v1/admin/courses/{id}/members; the class baseline; the 3 students join
+             the class with P5 evidence (production code, no model call); the small group (2
+             students + the teacher, through the API); two FAILED jobs and two synthetic PENDING
+             candidates (one each for the browser, one each for verify); walkthrough files
     (then)   apps/web/e2e/p7-acceptance.spec.ts: teacher pages, admin pages (retry + reject in the
              browser), a student's forbidden panel
     verify   roles from the database, forged metadata, the authorization matrix, exact cohort
              aggregates, suppression, privacy, N2, admin reads, retry / review / enrollment
-             idempotency, audit rows, zero model calls, registry and real learner unchanged
-    cleanup  delete the candidates and the accounts; prove nothing learner-owned remains
+             idempotency, audit rows, zero model calls of the run, registry and real learner
+    cleanup  delete the candidates and the accounts; prove nothing of the fixture remains
 
     cd services/backend
-    # API: services/backend/.env with GEMINI_API_KEY= (empty) and WORKER_ENABLED=false (port 8001)
+    # API: services/backend/.env with GEMINI_API_KEY blank and WORKER_ENABLED=false (port 8001)
     .venv/Scripts/python scripts/acceptance_p7.py prepare --api http://127.0.0.1:8001
     (browser walkthrough, see apps/web/e2e/p7-acceptance.spec.ts)
     .venv/Scripts/python scripts/acceptance_p7.py verify --api http://127.0.0.1:8001
@@ -56,6 +61,7 @@ REPO = BACKEND.parents[1]
 sys.path.insert(0, str(BACKEND))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import psycopg  # noqa: E402
 from acceptance_p5 import Http  # noqa: E402
 from acceptance_p5_hosted import (  # noqa: E402
     ROLE_NAMES,
@@ -68,14 +74,18 @@ from acceptance_p5_hosted import (  # noqa: E402
 )
 from grant_role import change_role  # noqa: E402
 
+from app.auth.roles import Actor  # noqa: E402
 from app.core.config import get_settings  # noqa: E402
 from app.db.pool import create_pool  # noqa: E402
 from app.intelligence.skill_graph.canonical import skill_key  # noqa: E402
+from app.teacher.models import TeacherViewPolicy  # noqa: E402
+from app.teacher.service import course_overview  # noqa: E402
 from tests.p5_fixtures import ROLES, seed_graph, seed_p5_learner_on_course  # noqa: E402
 
 HOSTED_COURSE = "9440004a-a25e-4e15-94c0-17c21f6bd695"
 ACCOUNTS = ("student1", "student2", "student3", "teacher", "outsider", "admin")
 STATES = ("UNKNOWN", "EMERGING", "DEVELOPING", "DEMONSTRATED", "VERIFIED", "NEEDS_REVERIFICATION")
+# What the P5 fixture makes of each role skill for every fixture student (tests/p5_fixtures.py).
 EXPECTED_STATES = {
     "for_loops": "DEMONSTRATED",
     "while_loops": "UNKNOWN",
@@ -83,6 +93,10 @@ EXPECTED_STATES = {
     "variables": "EMERGING",
     "indexing": "DEVELOPING",
 }
+FIXTURE_STUDENTS = 3
+FIXTURE_INDEPENDENT = 9  # per student: 4 for_loops + 2 variables + 3 indexing (one excluded)
+FIXTURE_MAPPED = ("for_loops", "comprehensions", "variables", "indexing")
+CANDIDATE_PREFIX = "ACCEPTANCE TEST P7 synthetic candidate"
 FORBIDDEN_KEYS = {
     "learner_id",
     "user_id",
@@ -136,14 +150,26 @@ def model_runs(pool) -> dict[str, int]:
     return {"generation": kinds.get("generation", 0), "embedding": kinds.get("embedding", 0)}
 
 
-def registry_counts(pool) -> list[int]:
-    return list(
-        one(
-            pool,
-            "select (select count(*) from public.skill_nodes), (select count(*) from public.skill_edges), "
-            "(select count(*) from public.skill_aliases)",
-        )
+def registry_counts(pool) -> dict[str, int]:
+    """The shared rows the acceptance must never create."""
+    names = ("skill_nodes", "skill_edges", "skill_aliases", "course_skills", "skill_embeddings")
+    values = one(
+        pool,
+        "select " + ", ".join(f"(select count(*) from public.{t})" for t in names),  # noqa: S608
     )
+    return dict(zip(names, values, strict=True))
+
+
+def class_members(pool, course: str) -> list[list[str]]:
+    return [
+        [str(r[0]), r[1]]
+        for r in rows(
+            pool,
+            "select user_id, role::text from public.course_memberships where course_id = %s "
+            "order by user_id",
+            course,
+        )
+    ]
 
 
 def learner_rows(pool, user: str) -> dict[str, int]:
@@ -162,14 +188,24 @@ def learner_rows(pool, user: str) -> dict[str, int]:
 
 
 def attributable_runs(pool, state: dict) -> int:
-    """Model runs of the acceptance's accounts, courses or jobs (must stay 0: P7 is model-free)."""
+    """Model runs of the acceptance's accounts, its small course or its jobs (must stay 0)."""
     return one(
         pool,
         "select count(*) from public.model_runs where learner_id = any(%s::uuid[]) "
         "or course_id = any(%s::uuid[]) or processing_job_id = any(%s::uuid[])",
         [a["id"] for a in state.get("accounts", {}).values()],
-        [c for c in (state.get("course"), state.get("small_course")) if c],
+        [c for c in (state.get("small_course"),) if c],
         list(state.get("jobs", {}).values()),
+    )[0]
+
+
+def fixture_candidates_left(pool, state: dict) -> int:
+    return one(
+        pool,
+        "select count(*) from public.skill_candidates where id = any(%s::uuid[]) "
+        "or canonical_name like %s",
+        list(state.get("candidates", {}).values()),
+        f"{CANDIDATE_PREFIX}%",
     )[0]
 
 
@@ -225,36 +261,120 @@ def call(api: str, bearer: str | None, method: str, path: str, body=None, key: s
     return Http(api, bearer).call(method, path, body if method == "POST" else None, headers)
 
 
+# --- expectations ------------------------------------------------------------------------------
+
+
+def baseline(pool, teacher: str, course: str, exclude: list[str] | None = None) -> dict:
+    """The class as the overview counts it WITHOUT the fixture students (the cohort floor is
+    bypassed here only, so a small existing cohort is still counted).
+
+    Before they join: a READ ONLY transaction. Afterwards (`exclude`): their STUDENT memberships
+    are removed inside a transaction that is ALWAYS rolled back, so the class's other members are
+    counted exactly as they are now, even while other activity changes them."""
+    policy = TeacherViewPolicy.model_construct(min_cohort=1, window_days=30, top_n=10_000)
+    actor = Actor(uuid.UUID(teacher), None, "TEACHER")
+    with pool.connection() as conn:
+        with conn.transaction():
+            if exclude:
+                conn.execute(
+                    "delete from public.course_memberships where course_id = %s "
+                    "and user_id = any(%s::uuid[]) and role = 'STUDENT'",
+                    (course, exclude),
+                )
+            else:
+                conn.execute("set transaction read only")
+            view = course_overview(conn, actor, uuid.UUID(course), policy)
+            if exclude:
+                raise psycopg.Rollback()
+    if view.cohort.suppressed:  # no existing student: every count is 0
+        empty = dict.fromkeys(STATES, 0)
+        skill_ids = [
+            str(r[0])
+            for r in rows(
+                pool,
+                "select cs.skill_id from public.course_skills cs join public.skill_nodes n "
+                "on n.id = cs.skill_id where cs.course_id = %s and cs.active "
+                "and n.status = 'ACTIVE' and n.node_kind in ('SKILL', 'SUBSKILL')",
+                course,
+            )
+        ]
+        return {
+            "students": 0,
+            "states": {sid: dict(empty) for sid in skill_ids},
+            "with_evidence": {},
+            "needs": {},
+            "mapped": {},
+            "independent": 0,
+            "verification": 0,
+            "students_with_evidence": 0,
+            "totals": empty,
+            "skills": view.course.skill_count,
+        }
+    return {
+        "students": view.cohort.student_count,
+        "states": {str(r.skill_id): dict(r.states) for r in view.skills},
+        "with_evidence": {str(r.skill_id): r.students_with_evidence for r in view.skills},
+        "needs": {str(n.skill_id): n.students for n in view.verification_needs},
+        "mapped": {str(m.skill_id): m.students for m in view.common_mapped_skills},
+        "independent": view.evidence_counts.independent,
+        "verification": view.evidence_counts.verification,
+        "students_with_evidence": view.evidence_counts.students_with_evidence,
+        "totals": dict(view.state_totals),
+        "skills": view.course.skill_count,
+    }
+
+
+def expected(state: dict) -> dict:
+    """Baseline + the fixture: every fixture student is UNKNOWN on the class's other skills."""
+    base, roles = state["baseline"], state["roles"]
+    by_role = {sid: key for key, sid in roles.items()}
+    states = {}
+    for sid, counts in base["states"].items():
+        states[sid] = dict(counts)
+        fixture_state = EXPECTED_STATES[by_role[sid]] if sid in by_role else "UNKNOWN"
+        states[sid][fixture_state] += FIXTURE_STUDENTS
+    totals = {s: sum(c[s] for c in states.values()) for s in STATES}
+    with_evidence = dict(base["with_evidence"])
+    for key in ("for_loops", "variables", "indexing"):
+        with_evidence[roles[key]] = with_evidence.get(roles[key], 0) + FIXTURE_STUDENTS
+    needs = dict(base["needs"])
+    needs[roles["comprehensions"]] = needs.get(roles["comprehensions"], 0) + FIXTURE_STUDENTS
+    mapped = dict(base["mapped"])
+    for key in FIXTURE_MAPPED:
+        mapped[roles[key]] = mapped.get(roles[key], 0) + FIXTURE_STUDENTS
+    return {
+        "students": base["students"] + FIXTURE_STUDENTS,
+        "states": states,
+        "totals": totals,
+        "with_evidence": with_evidence,
+        "needs": needs,
+        "mapped": mapped,
+        "independent": base["independent"] + FIXTURE_STUDENTS * FIXTURE_INDEPENDENT,
+        "verification": base["verification"],
+        "students_with_evidence": base["students_with_evidence"] + FIXTURE_STUDENTS,
+    }
+
+
 # --- prepare -----------------------------------------------------------------------------------
 
 
-def disposable_course(pool, owner: str, name: str, roles: dict[str, str], source: str) -> str:
-    """A learner-owned course whose overlay reuses the source course's canonical skills."""
-    with pool.connection() as conn, conn.transaction():
+def skill_free_course(pool, owner: str, name: str) -> str:
+    """A learner-owned course with NO course_skills: enough for the cohort-size suppression."""
+    with pool.connection() as conn:
         (course,) = conn.execute(
             """
-            insert into public.courses (owner_id, name, subject, level, graph_status, graph_version,
-                                        graph_generated_at)
-            values (%s, %s, 'Python', 'Beginner', 'READY', 1, now()) returning id
+            insert into public.courses (owner_id, name, subject, level, graph_status, graph_version)
+            values (%s, %s, 'Python', 'Beginner', 'READY', 1) returning id
             """,
             (owner, name),
         ).fetchone()
-        for skill in roles.values():
-            conn.execute(
-                """
-                insert into public.course_skills (course_id, skill_id, importance, source, graph_version)
-                select %s, cs.skill_id, cs.importance, 'MANUAL', 1 from public.course_skills cs
-                 where cs.course_id = %s and cs.skill_id = %s
-                """,
-                (course, source, skill),
-            )
     return str(course)
 
 
 def failed_job(pool, learner: str) -> str:
-    """One of the learner's seeded (completed, attributed) raw-message jobs, marked FAILED with an
-    error that carries secret-looking text the admin API must redact. Replaying it is 0 requests:
-    the turn is analysed and attributed already."""
+    """One of the learner's seeded (completed, analysed and attributed) raw-message jobs, marked
+    FAILED with an error carrying secret-looking text the admin API must redact. Re-running it
+    makes 0 model requests: the turn is analysed and attributed already."""
     secret = "AIza" + "S" * 35
     with pool.connection() as conn:
         (job,) = conn.execute(
@@ -274,37 +394,53 @@ def failed_job(pool, learner: str) -> str:
     return str(job)
 
 
-def synthetic_candidate(pool, label: str, course: str) -> str:
-    name = f"SkillMirror P7 acceptance candidate {label} {uuid.uuid4().hex[:8]}"
+def synthetic_candidate(pool, label: str) -> str:
+    name = f"{CANDIDATE_PREFIX} {label} {uuid.uuid4().hex[:8]}"
     with pool.connection() as conn:
         (candidate,) = conn.execute(
             """
-            insert into public.skill_candidates (canonical_name, normalized_name, description,
-                                                 first_course_id)
-            values (%s, %s, 'A synthetic candidate for the P7 acceptance (rejected).', %s)
+            insert into public.skill_candidates (canonical_name, normalized_name, description)
+            values (%s, %s, 'ACCEPTANCE TEST fixture: rejected and deleted by the P7 acceptance.')
             returning id
             """,
-            (name, skill_key(name), course),
+            (name, skill_key(name)),
         ).fetchone()
     return str(candidate)
+
+
+def enroll(api: str, admin: str, course: str, email: str, role: str) -> dict:
+    key = f"p7-enroll-{uuid.uuid4().hex}"
+    status, _ = call(
+        api,
+        admin,
+        "POST",
+        f"/v1/admin/courses/{course}/members",
+        {"email": email, "role": role},
+        key,
+    )
+    return {"course": course, "email": email, "role": role, "key": key, "status": status}
 
 
 def prepare(args, pool, supabase: Http) -> Report:
     report = Report()
     local = args.local_graph
     domain = "example.test" if local else "mailinator.com"
-    state: dict = {"target": "local" if local else "hosted", "api": args.api}
+    state: dict = {
+        "target": "local" if local else "hosted",
+        "api": args.api,
+        "prepare_started": one(pool, "select now()")[0].isoformat(),
+    }
 
     if local:
         seeder = sign_up(supabase, "source", domain)
         with pool.connection() as conn, conn.transaction():
             source, skills = seed_graph(conn, uuid.UUID(seeder["id"]), "P7L ")
-        source = str(source)
+        course = str(source)
         roles = {k: str(skills[k]) for k in ROLES}
         state["seeder"] = seeder
         state["local_graph_nodes"] = [str(v) for v in skills.values()]
     else:
-        source = args.course
+        course = args.course
         roles = {
             key: str(
                 one(
@@ -312,28 +448,25 @@ def prepare(args, pool, supabase: Http) -> Report:
                     "select n.id from public.skill_nodes n join public.course_skills cs "
                     "on cs.skill_id = n.id and cs.course_id = %s "
                     "where n.canonical_name = %s and n.status = 'ACTIVE'",
-                    source,
+                    course,
                     name,
                 )[0]
             )
             for key, name in ROLE_NAMES.items()
         }
-    real = str(one(pool, "select owner_id from public.courses where id = %s", source)[0])
+    real = str(one(pool, "select owner_id from public.courses where id = %s", course)[0])
     state.update(
-        source_course=source,
+        course=course,
         roles=roles,
         real_learner_id=real,
         real_snapshot=real_snapshot(pool, real),
         model_runs=model_runs(pool),
         registry=registry_counts(pool),
-        open_jobs=one(
-            pool,
-            "select count(*) from public.processing_jobs where state in ('PENDING', 'RETRY_WAIT', 'PROCESSING')",
-        )[0],
+        class_members=class_members(pool, course),
     )
     report.check(
         "P1",
-        "source course has the five role skills (prerequisite variables -> indexing)",
+        "the class has the five role skills (prerequisite variables -> indexing)",
         one(
             pool,
             "select count(*) from public.skill_edges where edge_type = 'PREREQUISITE' "
@@ -342,7 +475,7 @@ def prepare(args, pool, supabase: Http) -> Report:
             roles["indexing"],
         )[0]
         == 1,
-        {"source": source, "roles": len(roles)},
+        {"class": course, "existing_members": len(state["class_members"])},
     )
 
     accounts = {label: sign_up(supabase, label, domain) for label in ACCOUNTS}
@@ -368,67 +501,55 @@ def prepare(args, pool, supabase: Http) -> Report:
         "3 students, 2 teachers, 1 admin",
     )
 
+    time.sleep(3)  # tolerate a trailing local clock (the backend also allows 5 s of skew)
+    admin = token(supabase, accounts["admin"])
+    enrollments = [enroll(args.api, admin, course, accounts["teacher"]["email"], "TEACHER")]
+    state["baseline"] = baseline(pool, accounts["teacher"]["id"], course)
+
     students = [accounts[k]["id"] for k in ("student1", "student2", "student3")]
-    course = disposable_course(pool, students[0], "SkillMirror P7 acceptance class", roles, source)
-    small = disposable_course(
-        pool, students[0], "SkillMirror P7 acceptance small group", roles, source
-    )
     for student in students:
         seed_p5_learner_on_course(
             pool, uuid.UUID(student), uuid.UUID(course), {k: uuid.UUID(v) for k, v in roles.items()}
         )
-    state.update(course=course, small_course=small)
+    small = skill_free_course(pool, students[0], "ACCEPTANCE TEST P7 small group")
+    state["small_course"] = small
     save(state)
-
-    time.sleep(3)  # tolerate a trailing local clock (the backend also allows 5 s of skew)
-    admin = token(supabase, accounts["admin"])
-    enroll = []
-    for course_id, label, role in (
-        (course, "teacher", "TEACHER"),
-        (small, "student1", "STUDENT"),
-        (small, "student2", "STUDENT"),
-        (small, "teacher", "TEACHER"),
-    ):
-        key = f"p7-enroll-{uuid.uuid4().hex}"
-        status, body = call(
-            args.api,
-            admin,
-            "POST",
-            f"/v1/admin/courses/{course_id}/members",
-            {"email": accounts[label]["email"], "role": role},
-            key,
-        )
-        enroll.append(
-            {"course": course_id, "label": label, "role": role, "key": key, "status": status}
-        )
-    state["enrollments"] = enroll
+    for label, role in (("student1", "STUDENT"), ("student2", "STUDENT"), ("teacher", "TEACHER")):
+        enrollments.append(enroll(args.api, admin, small, accounts[label]["email"], role))
+    state["enrollments"] = enrollments
     report.check(
         "P3",
         "memberships through POST /v1/admin/courses/{id}/members",
-        [e["status"] for e in enroll] == [201, 201, 201, 201],
-        [e["status"] for e in enroll],
+        [e["status"] for e in enrollments] == [201, 201, 201, 201],
+        {
+            "statuses": [e["status"] for e in enrollments],
+            "baseline_students": state["baseline"]["students"],
+        },
     )
 
     state["jobs"] = {"browser": failed_job(pool, students[0]), "api": failed_job(pool, students[1])}
     state["candidates"] = {
-        "browser": synthetic_candidate(pool, "browser", course),
-        "api": synthetic_candidate(pool, "api", course),
+        "browser": synthetic_candidate(pool, "browser"),
+        "api": synthetic_candidate(pool, "api"),
     }
     save(state)
     report.check(
         "P4",
-        "two FAILED jobs and two PENDING synthetic candidates",
+        "two FAILED jobs and two ACCEPTANCE TEST candidates PENDING_REVIEW",
         one(
             pool,
-            "select (select count(*) from public.processing_jobs where id = any(%s::uuid[]) and state = 'FAILED'), "
-            "(select count(*) from public.skill_candidates where id = any(%s::uuid[]) and status = 'PENDING_REVIEW')",
+            "select (select count(*) from public.processing_jobs where id = any(%s::uuid[]) "
+            "and state = 'FAILED'), (select count(*) from public.skill_candidates "
+            "where id = any(%s::uuid[]) and status = 'PENDING_REVIEW' and canonical_name like %s)",
             list(state["jobs"].values()),
             list(state["candidates"].values()),
+            f"{CANDIDATE_PREFIX}%",
         )
         == (2, 2),
         {"jobs": state["jobs"], "candidates": state["candidates"]},
     )
 
+    want = expected(state)
     OUT.mkdir(parents=True, exist_ok=True)
     (OUT / "ui.env").write_text(
         "\n".join(
@@ -453,8 +574,11 @@ def prepare(args, pool, supabase: Http) -> Report:
                 "small_course_id": small,
                 "job_id": state["jobs"]["browser"],
                 "candidate_id": state["candidates"]["browser"],
-                "skills": 5,
-                "students": 3,
+                "skills": state["baseline"]["skills"],
+                "students": want["students"],
+                "unknown_total": want["totals"]["UNKNOWN"],
+                "independent": want["independent"],
+                "comprehensions_needs": want["needs"][roles["comprehensions"]],
             },
             indent=2,
         ),
@@ -475,6 +599,7 @@ def verify(args, pool, supabase: Http) -> Report:
     tokens = {label: token(supabase, accounts[label]) for label in ACCOUNTS}
     time.sleep(3)
     api = args.api
+    want = expected(state)
 
     def get(label, path):
         return call(api, tokens[label] if label else None, "GET", path)
@@ -523,8 +648,6 @@ def verify(args, pool, supabase: Http) -> Report:
     matrix = {}
     for label in ("student1", "teacher", "outsider", "admin"):
         matrix[label] = [call(api, tokens[label], m, p)[0] for m, p in routes]
-    expected_teacher = [200, 200] + [403] * 14
-    expected_outsider = [200, 404] + [403] * 14
     # The ADMIN is not a TEACHER member of the class: its teacher overview is 404 like any
     # non-member's, while the admin course lookup of the same course is 200.
     admin_ok = (
@@ -537,8 +660,8 @@ def verify(args, pool, supabase: Http) -> Report:
         "matrix: student 403 / teacher own course 200, admin 403 / outsider teacher 404 / "
         "admin: teacher overview 404, admin routes 200",
         matrix["student1"] == [403] * 16
-        and matrix["teacher"] == expected_teacher
-        and matrix["outsider"] == expected_outsider
+        and matrix["teacher"] == [200, 200] + [403] * 14
+        and matrix["outsider"] == [200, 404] + [403] * 14
         and admin_ok,
         matrix,
     )
@@ -548,59 +671,65 @@ def verify(args, pool, supabase: Http) -> Report:
     by_id = {c["id"]: c for c in listed["courses"]}
     report.check(
         "V5",
-        "teacher list: the class (3 students) and the small group (2, suppressed)",
+        "teacher list: the class (baseline + 3 students) and the small group (2, suppressed)",
         listed["min_cohort"] == 3
         and set(by_id) == {course, small}
-        and (by_id[course]["student_count"], by_id[course]["suppressed"]) == (3, False)
+        and (by_id[course]["student_count"], by_id[course]["suppressed"])
+        == (want["students"], False)
         and (by_id[small]["student_count"], by_id[small]["suppressed"]) == (2, True),
         {k: (v["student_count"], v["suppressed"]) for k, v in by_id.items()},
     )
 
-    # V6 / V7 exact aggregates and privacy.
+    # V6 / V7 exact aggregates (baseline + fixture) and privacy. The baseline is re-read right
+    # before the request (rolled back), so other members' activity since prepare is accounted for.
+    fixture_students = [accounts[k]["id"] for k in ("student1", "student2", "student3")]
+    fresh = baseline(pool, accounts["teacher"]["id"], course, exclude=fixture_students)
+    drift = fresh != state["baseline"]
+    want = expected({**state, "baseline": fresh})
     status, overview = get("teacher", f"/v1/teacher/courses/{course}/overview")
     skills = {row["skill_id"]: row for row in overview["skills"]}
-    per_skill = {key: skills[state["roles"][key]]["states"] for key in EXPECTED_STATES}
-    exact = all(
-        states[EXPECTED_STATES[key]] == 3 and sum(states.values()) == 3
-        for key, states in per_skill.items()
+    states_ok = {sid: row["states"] for sid, row in skills.items()} == want["states"]
+    evidence_ok = all(
+        row["students_with_evidence"] == want["with_evidence"].get(sid, 0)
+        for sid, row in skills.items()
     )
     needs = {n["skill_id"]: n["students"] for n in overview["verification_needs"]}
     mapped = {m["skill_id"]: m["students"] for m in overview["common_mapped_skills"]}
+    lists_ok = (
+        all(n == want["needs"].get(sid) for sid, n in needs.items())
+        and all(n == want["mapped"].get(sid) for sid, n in mapped.items())
+        and state["roles"]["comprehensions"] in needs
+    )
+    counts = overview["evidence_counts"]
     report.check(
         "V6",
-        "overview: exact per-skill states, UNKNOWN its own count, evidence, needs, mapped skills",
+        "overview = baseline + fixture: per-skill states, UNKNOWN its own count, evidence, needs, mapped",
         status == 200
-        and exact
-        and overview["state_totals"]
-        == {
-            "UNKNOWN": 6,
-            "EMERGING": 3,
-            "DEVELOPING": 3,
-            "DEMONSTRATED": 3,
-            "VERIFIED": 0,
-            "NEEDS_REVERIFICATION": 0,
-        }
-        and overview["evidence_counts"]["independent"] == 27
-        and overview["evidence_counts"]["students_with_evidence"] == 3
-        and needs == {state["roles"]["comprehensions"]: 3}
-        and mapped
-        == {state["roles"][k]: 3 for k in ("for_loops", "comprehensions", "variables", "indexing")},
+        and states_ok
+        and evidence_ok
+        and overview["state_totals"] == want["totals"]
+        and all(sum(s.values()) == want["students"] for s in want["states"].values())
+        and counts["independent"] == want["independent"]
+        and counts["verification"] == want["verification"]
+        and counts["students_with_evidence"] == want["students_with_evidence"]
+        and lists_ok,
         {
+            "baseline_students": fresh["students"],
+            "baseline_changed_since_prepare": drift,
             "totals": overview["state_totals"],
-            "evidence": overview["evidence_counts"],
+            "evidence": counts,
             "needs": len(needs),
             "mapped": len(mapped),
         },
     )
     text = json.dumps(overview)
-    leaked = [
-        label
-        for label in ACCOUNTS
-        if accounts[label]["id"] in text or accounts[label]["email"] in text
+    people = {**{k: v["id"] for k, v in accounts.items()}, "real": state["real_learner_id"]}
+    leaked = [k for k, v in people.items() if v in text] + [
+        k for k, v in accounts.items() if v["email"] in text
     ]
     report.check(
         "V7",
-        "no learner id, e-mail, debt, actor or AI-usage field in the overview",
+        "no learner id (fixture or real), e-mail, debt, actor or AI-usage field in the overview",
         not leaked and not keys_in(overview) & FORBIDDEN_KEYS,
         {"leaked": leaked, "forbidden_keys": sorted(keys_in(overview) & FORBIDDEN_KEYS)},
     )
@@ -646,43 +775,37 @@ def verify(args, pool, supabase: Http) -> Report:
     runs_status, runs = get("admin", "/v1/admin/model-runs?limit=50")
     lookup = get("admin", f"/v1/admin/courses?q={course}")[1]["courses"]
     candidates = get("admin", "/v1/admin/skill-candidates")[1]
+    teachers = sum(1 for _, role in state["class_members"] if role == "TEACHER") + 1
     report.check(
         "V10",
-        "admin reads: overview, failed job with a redacted error, model runs without output, lookup, queue",
+        "admin reads: overview, failed job with a redacted error, model runs without output, "
+        "lookup, queue",
         api_job is not None
         and api_job["retry_mode"] == "RETRY"
         and "AIza" not in (api_job["last_error"] or "")
         and "@example.test" not in (api_job["last_error"] or "")
         and runs_status == 200
         and "output" not in keys_in(runs)
-        and [(c["student_count"], c["teacher_count"]) for c in lookup] == [(3, 1)]
+        and [(c["student_count"], c["teacher_count"]) for c in lookup]
+        == [(want["students"], teachers)]
         and state["candidates"]["api"] in {c["id"] for c in candidates["candidates"]}
         and "budget" in overview_admin,
         {
             "retryable_failed": overview_admin["retryable_failed"],
             "error": (api_job or {}).get("last_error"),
-            "lookup": lookup and lookup[0]["name"],
+            "lookup": lookup and (lookup[0]["name"], lookup[0]["student_count"]),
         },
     )
 
-    # V11 retry over the API: once per key, audited.
+    # V11 retry over the API: once per key, audited. (A worker attached elsewhere may run the job
+    # at once: re-running the analysed, attributed turn is 0 model requests; V16 proves it.)
     job = state["jobs"]["api"]
+    path = f"/v1/admin/jobs/{job}/retry"
     key = f"p7-retry-{uuid.uuid4().hex}"
-    first = call(
-        api, tokens["admin"], "POST", f"/v1/admin/jobs/{job}/retry", {"mode": "RETRY"}, key
-    )
-    replay = call(
-        api, tokens["admin"], "POST", f"/v1/admin/jobs/{job}/retry", {"mode": "RETRY"}, key
-    )
-    other = call(
-        api,
-        tokens["admin"],
-        "POST",
-        f"/v1/admin/jobs/{job}/retry",
-        {"mode": "RESUME_ATTRIBUTION"},
-        key,
-    )
-    again = call(api, tokens["admin"], "POST", f"/v1/admin/jobs/{job}/retry", {"mode": "RETRY"})
+    first = call(api, tokens["admin"], "POST", path, {"mode": "RETRY"}, key)
+    replay = call(api, tokens["admin"], "POST", path, {"mode": "RETRY"}, key)
+    other = call(api, tokens["admin"], "POST", path, {"mode": "RESUME_ATTRIBUTION"}, key)
+    again = call(api, tokens["admin"], "POST", path, {"mode": "RETRY"})
     audit = rows(
         pool,
         "select action::text, actor_role::text from public.audit_events where entity_id = %s",
@@ -721,36 +844,35 @@ def verify(args, pool, supabase: Http) -> Report:
     )
     browser_audit = rows(
         pool,
-        "select action::text from public.audit_events where entity_id = any(%s::uuid[]) order by action",
+        "select action::text from public.audit_events where entity_id = any(%s::uuid[]) "
+        "order by action",
         [state["jobs"]["browser"], state["candidates"]["browser"]],
     )
     report.check(
         "V12",
         "the walkthrough's retry and reject happened once, audited",
-        tuple(browser_job) == ("PENDING", 1)
+        browser_job[0] in ("PENDING", "PROCESSING", "COMPLETED")
+        and browser_job[1] == 1
         and browser_candidate == ("REJECTED",)
         and [a[0] for a in browser_audit] == ["CANDIDATE_REJECT", "JOB_RETRY"],
         {"job": browser_job, "candidate": browser_candidate, "audit": browser_audit},
     )
 
-    # V13 candidate REJECT over the API.
+    # V13 candidate REJECT over the API (never APPROVE / MERGE).
     candidate = state["candidates"]["api"]
+    path = f"/v1/admin/skill-candidates/{candidate}/review"
     key = f"p7-reject-{uuid.uuid4().hex}"
-    body = {"action": "REJECT", "note": "Synthetic acceptance candidate."}
-    rejected = call(
-        api, tokens["admin"], "POST", f"/v1/admin/skill-candidates/{candidate}/review", body, key
-    )
-    replayed = call(
-        api, tokens["admin"], "POST", f"/v1/admin/skill-candidates/{candidate}/review", body, key
-    )
-    twice = call(
-        api, tokens["admin"], "POST", f"/v1/admin/skill-candidates/{candidate}/review", body
-    )
+    body = {"action": "REJECT", "note": "ACCEPTANCE TEST candidate."}
+    rejected = call(api, tokens["admin"], "POST", path, body, key)
+    replayed = call(api, tokens["admin"], "POST", path, body, key)
+    twice = call(api, tokens["admin"], "POST", path, body)
     report.check(
         "V13",
         "candidate review: REJECT once per key, a second review is 409",
         rejected[0] == 200
         and rejected[1]["candidate"]["status"] == "REJECTED"
+        and rejected[1]["skill"] is None
+        and rejected[1]["embed_job_id"] is None
         and replayed[1]["replayed"] is True
         and twice[0] == 409,
         {"reject": rejected[0], "replay": replayed[0], "twice": twice[0]},
@@ -763,7 +885,7 @@ def verify(args, pool, supabase: Http) -> Report:
         tokens["admin"],
         "POST",
         f"/v1/admin/courses/{first_enroll['course']}/members",
-        {"email": accounts["teacher"]["email"], "role": "TEACHER"},
+        {"email": first_enroll["email"], "role": first_enroll["role"]},
         first_enroll["key"],
     )
     guarded = call(
@@ -785,7 +907,7 @@ def verify(args, pool, supabase: Http) -> Report:
         rows(
             pool,
             "select action::text, count(*) from public.audit_events "
-            "where entity_id = any(%s::uuid[]) group by 1",
+            "where entity_id = any(%s::uuid[]) and created_at >= %s::timestamptz group by 1",
             [
                 *[accounts[k]["id"] for k in ("teacher", "outsider", "admin")],
                 course,
@@ -793,6 +915,7 @@ def verify(args, pool, supabase: Http) -> Report:
                 *state["jobs"].values(),
                 *state["candidates"].values(),
             ],
+            state["prepare_started"],
         )
     )
     report.check(
@@ -803,23 +926,26 @@ def verify(args, pool, supabase: Http) -> Report:
         actions,
     )
 
-    # V16 zero model calls; registry and real learner unchanged.
+    # V16 zero model calls of the run; the real learner unchanged; no shared row created.
     report.check(
         "V16",
-        "no model run belongs to the run's accounts, courses or jobs; the real learner is unchanged",
+        "no model run belongs to the run's accounts, small course or jobs; real learner unchanged",
         attributable_runs(pool, state) == 0
         and real_snapshot(pool, state["real_learner_id"]) == state["real_snapshot"],
         {"attributable_runs": attributable_runs(pool, state)},
     )
-    unchanged = (
-        model_runs(pool) == state["model_runs"] and registry_counts(pool) == state["registry"]
-    )
-    detail = {"model_runs": model_runs(pool), "registry": registry_counts(pool)}
+    registry = registry_counts(pool)
     if state["target"] == "hosted":
-        report.check("V17", "global model_runs and registry counts unchanged", unchanged, detail)
+        report.check(
+            "V17",
+            "no skill_nodes, edges, aliases, course_skills or embeddings created",
+            registry == state["registry"],
+            registry,
+        )
     else:
-        # The local stack is shared with other local work (tests); informational only.
-        print(f"[INFO] V17 local global counts {'unchanged' if unchanged else 'changed'}: {detail}")
+        print(f"[INFO] V17 local shared counts (the local stack is shared): {registry}")
+    now = model_runs(pool)
+    print(f"[INFO] global model_runs {state['model_runs']} -> {now} (other activity may add runs)")
     state["verify"] = report.results
     save(state)
     return report
@@ -839,8 +965,9 @@ def cleanup(args, pool, supabase: Http) -> Report:
     runs_of_the_run = attributable_runs(pool, state)  # before the deletes null the references
     with pool.connection() as conn:
         conn.execute(
-            "delete from public.skill_candidates where id = any(%s::uuid[])",
-            (list(state.get("candidates", {}).values()),),
+            "delete from public.skill_candidates where id = any(%s::uuid[]) "
+            "and canonical_name like %s",
+            (list(state.get("candidates", {}).values()), f"{CANDIDATE_PREFIX}%"),
         )
     users = [state["accounts"][k]["id"] for k in ACCOUNTS if k in state.get("accounts", {})]
     if state.get("seeder"):
@@ -863,34 +990,38 @@ def cleanup(args, pool, supabase: Http) -> Report:
         set(statuses) == {200} and auth_left == 0 and not left,
         {"deleted": len(statuses), "auth_left": auth_left, "left": left},
     )
-    candidates_left = one(
-        pool,
-        "select count(*) from public.skill_candidates where id = any(%s::uuid[])",
-        list(state.get("candidates", {}).values()),
-    )[0]
-    courses_left = one(
-        pool,
-        "select count(*) from public.courses where id = any(%s::uuid[])",
-        [c for c in (state.get("course"), state.get("small_course")) if c],
+    small_left = one(
+        pool, "select count(*) from public.courses where id = %s", state.get("small_course")
     )[0]
     report.check(
         "C2",
-        "synthetic candidates and the disposable courses are gone",
-        candidates_left == 0 and courses_left == 0,
-        {"candidates": candidates_left, "courses": courses_left},
+        "0 ACCEPTANCE TEST candidate rows remain; the small course is gone",
+        fixture_candidates_left(pool, state) == 0 and small_left == 0,
+        {"candidates": fixture_candidates_left(pool, state), "small_course": small_left},
+    )
+    report.check(
+        "C3",
+        "no model run belonged to the run",
+        runs_of_the_run == 0,
+        {"attributable_runs": runs_of_the_run},
     )
     if state["target"] == "hosted":
         report.check(
-            "C3",
-            "registry unchanged, 0 model requests, real learner unchanged",
-            registry_counts(pool) == state["registry"]
-            and model_runs(pool) == state["model_runs"]
-            and real_snapshot(pool, state["real_learner_id"]) == state["real_snapshot"],
-            {"registry": registry_counts(pool), "model_runs": model_runs(pool)},
+            "C4",
+            "the class has exactly its original members; no shared row was created",
+            class_members(pool, state["course"]) == state["class_members"]
+            and registry_counts(pool) == state["registry"],
+            {"members": len(class_members(pool, state["course"])), "shared": registry_counts(pool)},
+        )
+        report.check(
+            "C5",
+            "the real P3B/P4 learner is unchanged",
+            real_snapshot(pool, state["real_learner_id"]) == state["real_snapshot"],
+            state["real_snapshot"][:16],
         )
     else:
-        # The local rehearsal's own registry rows (the seeded P7L graph), like the test fixture's
-        # teardown: the local stack may be shared with other work, so no `db reset` is needed.
+        # The rehearsal's own registry rows (the seeded P7L graph), like the test fixtures'
+        # teardown: the local stack may be shared with other work, so there is no `db reset`.
         with pool.connection() as conn, conn.transaction():
             ids = [
                 r[0]
@@ -907,17 +1038,15 @@ def cleanup(args, pool, supabase: Http) -> Report:
             conn.execute("delete from public.skill_aliases where skill_id = any(%s)", (ids,))
             conn.execute("delete from public.skill_nodes where id = any(%s)", (ids,))
         report.check(
-            "C3",
-            "no model run belonged to the run; the local P7L graph removed",
-            runs_of_the_run == 0
-            and one(
-                pool, "select count(*) from public.skill_nodes where canonical_name like 'P7L %%'"
-            )[0]
+            "C4",
+            "the local P7L graph removed",
+            one(pool, "select count(*) from public.skill_nodes where canonical_name like 'P7L %%'")[
+                0
+            ]
             == 0,
-            {"attributable_runs": runs_of_the_run, "graph_nodes_removed": len(ids)},
+            {"graph_nodes_removed": len(ids)},
         )
-    for name in ("ui.env",):
-        (OUT / name).unlink(missing_ok=True)
+    (OUT / "ui.env").unlink(missing_ok=True)
     state["cleanup"] = report.results
     save(state)
     return report
@@ -954,6 +1083,7 @@ def main() -> int:
         report = PHASES[args.phase](args, pool, Http(supabase_url, apikey=anon))
     finally:
         pool.close()
+    OUT.mkdir(parents=True, exist_ok=True)
     (OUT / f"evidence-{args.phase}.json").write_text(
         json.dumps({"passed": report.passed, "results": report.results}, indent=2, default=str),
         encoding="utf-8",

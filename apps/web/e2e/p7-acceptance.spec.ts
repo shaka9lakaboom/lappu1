@@ -20,12 +20,16 @@ import { expect as baseExpect, test, type Page } from '@playwright/test';
 const expect = baseExpect.configure({ timeout: 30_000 });
 
 interface Expectations {
+  /** The class: an existing course (hosted: 9440004a) with its baseline members + 3 fixture students. */
   course_id: string;
   small_course_id: string;
   job_id: string;
   candidate_id: string;
   skills: number;
   students: number;
+  unknown_total: number;
+  independent: number;
+  comprehensions_needs: number;
 }
 
 const env = (name: string) => process.env[name];
@@ -65,10 +69,10 @@ test('teacher: class overview without individual data, small group suppressed', 
   await expect(page).toHaveURL(new RegExp(`/teacher/courses/${e.course_id}$`));
   await expect(page.getByTestId('cohort-banner')).toHaveAttribute('data-suppressed', 'false');
   await expect(page.getByTestId('cohort-banner')).toContainText(`${e.students} students enrolled`);
-  await expect(page.getByTestId('state-legend')).toContainText('Not enough evidence yet: 6');
+  await expect(page.getByTestId('state-legend')).toContainText(`Not enough evidence yet: ${e.unknown_total}`);
   await expect(page.getByTestId('teacher-skill-row')).toHaveCount(e.skills);
-  await expect(page.getByTestId('verification-needs')).toContainText('3 students');
-  await expect(page.getByTestId('evidence-independent')).toContainText('27');
+  await expect(page.getByTestId('verification-needs')).toContainText(`${e.comprehensions_needs} students`);
+  await expect(page.getByTestId('evidence-independent')).toContainText(String(e.independent));
   // No student identity reaches the page.
   await expect(page.locator('body')).not.toContainText('@mailinator.com');
   await expect(page.locator('body')).not.toContainText('@example.test');
@@ -117,7 +121,7 @@ test('admin: overview, retry a failed job, reject a candidate, model runs, bench
   await page.goto('/admin/skill-candidates');
   const card = page.locator(`[data-candidate-id="${e.candidate_id}"]`);
   await expect(card).toHaveAttribute('data-status', 'PENDING_REVIEW');
-  await card.getByLabel('Note').fill('Synthetic acceptance candidate.');
+  await card.getByLabel('Note').fill('ACCEPTANCE TEST candidate.');
   await card.getByRole('button', { name: 'Reject' }).click();
   // The refreshed review queue no longer holds it; the REJECTED list does.
   await expect(page.locator(`[data-candidate-id="${e.candidate_id}"]`)).toHaveCount(0);
