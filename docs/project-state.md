@@ -3,7 +3,7 @@
 This record carries live implementation status (architecture §0.1). It must never
 claim an unverified gate. Architecture: [`architecture/`](architecture/). Decisions:
 [`decisions/`](decisions/) (0001 P0, 0002 P1, 0003 P2 + P3A, 0004 free-tier ModelGateway,
-0005 P3B + P4, 0006 P5, 0007 P6).
+0005 P3B + P4, 0006 P5, 0007 P6, 0008 P7 + P8).
 
 **Last updated:** 2026-09-25
 
@@ -46,8 +46,36 @@ The old P9 "Deployment + release" is replaced by **P9 — Local Demo Integration
 `skillmirror-p7-p8-teacher-admin-hardening` from `main` `4a648ac` (the P6 merge). Hosted has
 **0001–0008**. **P7 is migration `0009_teacher_admin_ops.sql`**; it is pushed to hosted only after
 the owner's explicit approval. **P8 (benchmark + hardening) follows P7** and needs no migration of
-its own (its storage, `benchmark_runs`, is part of 0009).
-**Status: IN PROGRESS.**
+its own (its storage, `benchmark_runs`, is part of 0009). Decisions:
+[ADR 0008](decisions/0008-p7-p8-teacher-admin-hardening.md).
+**Status: P7 IMPLEMENTED AND VALIDATED LOCALLY; STOPPED AT THE MIGRATION APPROVAL GATE.** Migration
+0009 is not on hosted; the final dry run lists exactly `0009_teacher_admin_ops.sql`. Waiting for
+the owner's explicit approval to push it. P8 has not started (beyond the two hardening items that
+touch P7 code: the JWT clock-skew leeway and error redaction).
+
+```
+GET /v1/me · GET /v1/teacher/courses[/{id}/overview]   (profile role from the database)
+/v1/admin: overview · jobs (+ POST retry: RETRY | RESUME_ATTRIBUTION) · model-runs · benchmark
+           skill-candidates (+ POST review: APPROVE | MERGE | REJECT) · courses (+ POST members) · skills
+every admin mutation: Idempotency-Key -> one transaction -> audit event; no model call anywhere
+```
+
+| Gate | State | Evidence |
+| --- | --- | --- |
+| Migration 0009 applies from a clean reset; 0001–0008 unchanged | PASS (local) | `supabase db reset` 0001–0009; pgTAP pins the CR-normalized applied statements of 0001–0008, equal to the hosted ones (read-only query); git blob ids pinned (0008 added) |
+| pgTAP 0009 (tables, enums, guards, retry / review / membership rules, RLS sweep over every public table, teacher JWT) | PASS: 75 | `supabase/tests/0009_teacher_admin_ops.test.sql`; total **363** |
+| Roles from `profiles.role`, not token metadata | PASS | DB matrix (16 routes × student / forged metadata / teacher / admin); local acceptance V1–V4 with a real `updateUser` metadata forgery |
+| Teacher overview: exact aggregates, UNKNOWN neutral, no per-student / name / AI-usage / debt data, cohort ≥ 3 | PASS | `test_teacher_db.py` (3 seeded students: exact per-skill states, totals, evidence 27, needs, mapped skills; corrections drop out; suppression); contract tests; acceptance V5–V8 |
+| N2: STUDENT memberships only for the learning context | PASS | `test_a_teacher_membership_is_never_a_learning_context`; acceptance V9 |
+| Retry: FAILED → PENDING, audited, idempotent, cap 5; bootstrap resumes at EMBEDDING (N3, 0 generation); closed verification refused; RESUME_ATTRIBUTION = 1 request, no duplicates (K7) | PASS | `test_admin_db.py` (mutation-checked); acceptance V10–V12 |
+| Candidate review APPROVE / MERGE / REJECT; approved skill embedded and retrievable; rejected name never returns (N4) | PASS | `test_admin_db.py` (mutation-checked); acceptance V12–V13 |
+| Enrollment + teacher-membership guard; audit trail | PASS | `test_admin_db.py`; acceptance V14–V15 |
+| Redaction; model runs without output (N6) | PASS | `test_p7_unit.py`, `test_admin_db.py`; acceptance V10 + browser |
+| Zero model calls | PASS | `test_zero_model_calls` loads every P7 module gateway-free; acceptance V16 (no model run belongs to the run) |
+| Web pages | PASS | vitest 96, lint, typecheck, build; local browser walkthrough 3/3 |
+| Local P7 acceptance | **PASS**: prepare 4/4 · browser 3/3 · verify 16/16 · cleanup 3/3 | `scripts/acceptance_p7.py --local-graph`, `apps/web/e2e/p7-acceptance.spec.ts` |
+| Hosted migration 0009 | **WAITING FOR OWNER APPROVAL** (dry run: exactly 0009) | — |
+| Hosted P7 acceptance | not run (after the push) | — |
 
 ### Previous phase: P6 (merged in PR #6, `4a648ac`)
 
@@ -242,7 +270,22 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
 
 ## Database
 
-- Latest migration: **`0008_verification.sql`** (ADR 0007), **on hosted since 2026-09-25**:
+- Next migration: **`0009_teacher_admin_ops.sql`** (ADR 0008), **local only** until the owner
+  approves the push:
+  - enums `audit_actor_type`, `audit_action`, `benchmark_mode`, `benchmark_verdict`
+  - `audit_events` (server-only, append-only; one row per admin / operator mutation with its
+    Idempotency-Key) and `benchmark_runs` (server-only, append-only; written by P8)
+  - `processing_jobs.manual_retry_count` (0–5) + `last_manual_retry_at`, with a guard
+  - `skill_candidates.reviewed_by / reviewed_at / review_note`, the review guard, one REJECTED
+    row per name
+  - teacher-membership guards on `course_memberships` and `profiles.role`
+  - indexes for admin lists, cohorts and the P8 stale-ledger recompute
+  - policy key `teacher_view` (`{min_cohort: 3, window_days: 30, top_n: 10}`)
+  - no new client grant or policy; pgTAP runs an RLS sweep over every public table
+  - *Finding (2026-09-25):* hosted **0002 and 0008 were pushed from CRLF working copies** (the
+    CLI stores the file's bytes; the SQL is identical). Migration pins now compare CR-normalized
+    statements, and a test requires 0009 to be LF on disk before its push.
+- Latest on hosted: **`0008_verification.sql`** (ADR 0007), **on hosted since 2026-09-25**:
   - enums `verification_state` (PLANNED, READY, IN_PROGRESS, SUBMITTED, EVALUATED, ABANDONED),
     `verification_assessment_type`, `verification_grader_type` (MCQ_EXACT, NUMERIC_TOLERANCE,
     RUBRIC_AI), `verification_evaluator_type` (DETERMINISTIC, AI_RUBRIC)
@@ -309,7 +352,7 @@ PENDING, because Google returned repeated HTTP 503 "high demand".**
   - qualification floors 0.60
   - processing unit: 4 context messages, 120 s pairing window
   - skill graph 30–60 skills (hard 20–80), default importance 0.5
-- pgTAP: `0001` (13), `0002` (33), `0003` (49), `0004` (10), `0005` (40), `0006` (15), `0007` (49), `0008` (79) = **288**.
+- pgTAP: `0001` (13), `0002` (33), `0003` (49), `0004` (10), `0005` (40), `0006` (15), `0007` (49), `0008` (79), `0009` (75) = **363**.
 - **`0004_model_gateway_cache.sql` (ADR 0004)** is additive:
   - `model_runs.cache_key` and `model_runs.cache_source_run_id`, both nullable
   - two checks on those columns: a cache key only on `SUCCEEDED` rows; a cache hit is a
@@ -838,8 +881,8 @@ is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 R
 
 | Item | Value |
 | --- | --- |
-| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}`; P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections); **P6: `/verifications` (Verification Center), `/verifications/{id}` (challenge, result)**) |
-| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, `GET /v1/ledger[?course_id=]` (P4, + `debt_band`), P5: `GET /v1/skills/{id}`, `GET /v1/activity`, `POST /v1/feedback` (Idempotency-Key), `GET /v1/recommendations`; **P6: `GET /v1/verifications` (plans, no model call), `GET /v1/verifications/{id}`, `POST /v1/verifications/{id}/start`, `POST /v1/verifications/{id}/submit` (Idempotency-Key), `POST /v1/verifications/{id}/abandon`**; OpenAPI `/docs` |
+| Web | http://localhost:3000 (`/courses`, `/courses/new`, `/courses/{id}`; P5: `/dashboard` (courses, state counts, recommendations), `/skills`, `/skills/{id}`, `/activity` (enriched + corrections); P6: `/verifications` (Verification Center), `/verifications/{id}` (challenge, result); **P7: `/teacher`, `/teacher/courses/{id}`, `/admin`, `/admin/jobs`, `/admin/model-runs`, `/admin/skill-candidates`, `/admin/benchmark`**) |
+| API | http://localhost:8000: `/health`, `POST/GET /v1/events/…`, `POST /v1/courses`, `GET /v1/courses`, `GET /v1/courses/{id}`, `GET /v1/courses/{id}/skills`, `GET /v1/ledger[?course_id=]` (P4, + `debt_band`), P5: `GET /v1/skills/{id}`, `GET /v1/activity`, `POST /v1/feedback` (Idempotency-Key), `GET /v1/recommendations`; **P6: `GET /v1/verifications` (plans, no model call), `GET /v1/verifications/{id}`, `POST /v1/verifications/{id}/start`, `POST /v1/verifications/{id}/submit` (Idempotency-Key), `POST /v1/verifications/{id}/abandon`**; **P7: `GET /v1/me`, `GET /v1/teacher/courses`, `GET /v1/teacher/courses/{id}/overview`, `/v1/admin/{overview, jobs[/{id}], jobs/{id}/retry, model-runs, skill-candidates, skill-candidates/{id}/review, benchmark[/{id}], courses[/{id}], courses/{id}/members, skills[/{id}]}`**; OpenAPI `/docs` |
 | Worker | in the API process when `DATABASE_URL` + `GEMINI_API_KEY` are set; or `python -m app.jobs.worker [--once]` |
 | Deployed web / API | none, by decision (local-first) |
 | Extension version | 0.2.0, dev id `cohpimnabjigooghbigblennedbplojm` (unchanged in this phase) |
@@ -850,16 +893,17 @@ is deferred. *(That 20/day is the `gemini-3.7-flash` limit; on Flash-Lite, 500 R
 | Suite | Local | CI job |
 | --- | --- | --- |
 | Backend `ruff check` + `ruff format --check` (incl. benchmark runner) | clean | Backend |
-| Backend pytest, unit (no DB) | **747 passed, 132 skipped** (P5: 575 / 102) | Backend |
-| Backend pytest, with local Postgres (after `supabase db reset`) | **879 passed** (P5: 677) | Backend ingestion + intelligence + database |
-| Database pgTAP (after `supabase db reset`) | **288 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49 + 79) | Database |
+| Backend pytest, unit (no DB) | **817 passed, 152 skipped** (P6: 747 / 132) | Backend |
+| Backend pytest, with local Postgres (0001–0009) | **969 passed** (P6: 879) | Backend ingestion + intelligence + database |
+| Database pgTAP (0001–0009) | **363 passed** (13 + 33 + 49 + 10 + 40 + 15 + 49 + 79 + 75) | Database |
 | P3B/P4 safety benchmark (`benchmark/runners/p3b_p4_safety.py`, 22 deterministic cases) | **22/22**; False AI Assistance Debt Rate **0/21**; debt recall 2/2 | Backend (`test_benchmark_safety.py`) |
 | Web ESLint | 0 problems | Web |
 | Typecheck (web, contracts, config, ui, extension) | 5/5 clean | Web, Extension |
-| Web vitest | **80 passed** (P5: 63) | Web |
+| Web vitest | **96 passed** (P6: 80) | Web |
 | Web production build (no env) | pass | Web |
 | Extension vitest | **78 passed** | Extension |
 | Extension build + manifest validation + Chromium (load ×2, capture → queue → sync ×1) | pass, **3 passed** | Extension |
+| Local P7 acceptance (no model call) | **PASS**: prepare 4/4, browser 3/3, verify 16/16, cleanup 3/3 | not in CI by design |
 | Local P6 acceptance (scripted fake provider) | **PASS**: 15/15 + browser walkthrough (1 passed); 0 real model calls | not in CI by design |
 | Hosted P6 acceptance (real Gemini) | **PASS on `gemini-3.5-flash-lite`**: 12/12 + browser walkthrough; 1 generation / 0 evaluation / 0 embedding; REAL LIVE PROOF; disposable learner deleted; real learner untouched | not in CI by design |
 | Local P5 acceptance (no model call) | **PASS**: 10/10 API checks + browser walkthrough (1 passed); `model_runs` unchanged | not in CI by design |
@@ -921,10 +965,9 @@ auth round trip.
   - The hosted VERIFIED came from one live pass on top of a deterministic pre-pass fixture sized
     so that one pass could meet the gates (the REAL LIVE PROOF case; nothing was added after the
     pass). A learner with less prior evidence correctly stays below VERIFIED after one pass.
-- **Backend JWT `iat` has no leeway (pre-existing, P0 auth):** a token used within about a second
-  of issue can be rejected with 401 *token is not yet valid* when the local clock trails Supabase
-  Auth's. Seen once in the hosted P6 run; the acceptance script waits 3 s. A small leeway in the
-  token verification is the fix (not changed in P6).
+- ~~**Backend JWT `iat` has no leeway (pre-existing, P0 auth)**~~ — **fixed in P7** (ADR 0008 §21):
+  a bounded 5 s clock-skew leeway (max 30 s); tests prove +3 s accepted, +60 s and a 10 s-expired
+  token rejected.
 - **Hosted pooler connections can drop.** One fixture connection was closed by the server
   mid-transaction during the hosted P6 run and left an orphaned idle-in-transaction backend. The
   product's writes are single transactions (a dropped connection rolls back); the acceptance
@@ -976,7 +1019,9 @@ auth round trip.
 - `raw_messages.active_course_id` has no FK (append-only table). It is validated at processing time.
 - The extension does not send `active_course_id` yet. Course context is then all of the learner's
   courses (at most 5).
-- `skill_candidates` has no review UI yet (P7). The course graph cannot be regenerated from the UI.
+- `skill_candidates` review: **done in P7** (`/admin/skill-candidates`, APPROVE / MERGE / REJECT).
+  Regenerating a READY course graph from the UI stays a limitation (V1.2); a FAILED bootstrap is
+  retried from `/admin/jobs` (resuming at its stage).
 - Carried over from P1: the signed-in ChatGPT layout is covered only by a synthetic fixture; there
   is no "capture degraded" popup state yet (P8); auto-confirm is on for the hosted project.
 
@@ -998,6 +1043,8 @@ auth round trip.
     `MODEL_DAILY_REQUEST_LIMITS` and `MODEL_QUOTA_RESERVE` in the process environment only.
   - **ADR 0006 (P5):** no new variable. P5 needs no `GEMINI_API_KEY`. The course selector
     is a UI cookie (`sm_course`), not configuration.
+  - **ADR 0008 (P7):** no new variable. Roles are granted by the operator with
+    `scripts/grant_role.py` (DATABASE_URL); the teacher view reads `policy_config.teacher_view`.
   - **ADR 0007 (P6):** no new variable. The HTTP paths need no `GEMINI_API_KEY`; the worker
     needs it for `GENERATE_VERIFICATION` (and `GRADE_VERIFICATION` of free-text answers). The
     verification policy lives in `policy_config.verification`, not the environment.
@@ -1007,12 +1054,14 @@ auth round trip.
 
 ## Exact next action
 
-1. **P7 + P8** on `skillmirror-p7-p8-teacher-admin-hardening` (from the P6 merge `4a648ac`):
-   implement and locally validate migration **`0009_teacher_admin_ops.sql`**, then **stop before
-   `supabase db push --linked`** and wait for the owner's explicit approval. After approval: push
-   0009 only, verify hosted, run the P7 hosted acceptance, then the P8 benchmark (deterministic
-   120/120, replay set, bounded Flash-Lite live set) and hardening; one PR into `main`, not merged;
-   P9 is not started.
+1. **Owner: approve (or not) the hosted push of migration 0009.** P7 is implemented and validated
+   locally on `skillmirror-p7-p8-teacher-admin-hardening`; the agent stopped before
+   `supabase db push --linked` (dry run: exactly `0009_teacher_admin_ops.sql`). After approval:
+   push 0009 only, verify hosted read-only, run the P7 hosted acceptance
+   (`scripts/acceptance_p7.py`: disposable accounts, a disposable course reusing 5 canonical skills
+   of `9440004a`, no new registry rows, the real learner hashed, 0 model calls), then P8
+   (deterministic 120/120, replay set, bounded Flash-Lite live set recorded in `benchmark_runs`,
+   hardening), CI, one PR into `main` (not merged); P9 is not started.
 2. *(Done: PR #6 merged as `4a648ac`.)*
 3. **Optional, when quota allows** (Flash-Lite has 500 RPD):
    - one live free-text verification (1 generation + 1 evaluation) to exercise
