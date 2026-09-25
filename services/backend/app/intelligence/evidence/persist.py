@@ -30,7 +30,7 @@ from app.intelligence.evidence.engine import QUALIFIER_VERSION, Qualification
 from app.intelligence.processing.persist import ANALYSIS_VERSION
 
 # Idempotency key of a segment's attribution.
-ATTRIBUTION_VERSION = "p3b-v1"
+from app.intelligence.versions import ATTRIBUTION_VERSION
 
 
 @dataclass(frozen=True)

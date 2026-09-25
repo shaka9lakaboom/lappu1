@@ -191,3 +191,31 @@ def test_verifier_is_built_from_settings() -> None:
     settings = make_settings(supabase_url="https://project-ref.supabase.co")
     verifier = dependencies.get_jwt_verifier(settings)
     assert verifier.issuer == ISSUER
+
+
+# --- Clock skew (P8 hardening: the hosted P6 run saw "not yet valid (iat)") ------------------
+
+
+def test_a_token_issued_a_few_seconds_ahead_of_this_clock_is_accepted(ec_key) -> None:
+    token = jwt.encode(claims(iat=int(time.time()) + 3), ec_key, algorithm="ES256")
+    assert es256_verifier(ec_key).verify(token).email == "learner@test.invalid"
+
+
+def test_a_token_issued_well_in_the_future_is_still_rejected(ec_key) -> None:
+    token = jwt.encode(claims(iat=int(time.time()) + 60), ec_key, algorithm="ES256")
+    with pytest.raises(TokenVerificationError, match="not yet valid"):
+        es256_verifier(ec_key).verify(token)
+
+
+def test_the_clock_skew_leeway_is_small_and_bounded(ec_key) -> None:
+    from app.auth.jwt import CLOCK_SKEW_LEEWAY_SECONDS, MAX_CLOCK_SKEW_SECONDS
+
+    assert es256_verifier(ec_key).leeway_seconds == CLOCK_SKEW_LEEWAY_SECONDS == 5
+    assert MAX_CLOCK_SKEW_SECONDS == 30
+    for bad in (-1, 31):
+        with pytest.raises(ValueError, match="leeway"):
+            SupabaseJWTVerifier(ISSUER, jwks_client=FakeJWKSClient(), leeway_seconds=bad)
+    # An expired token stays expired: 10 s past `exp` is beyond the 5 s leeway.
+    expired = jwt.encode(claims(exp=int(time.time()) - 10), ec_key, algorithm="ES256")
+    with pytest.raises(TokenVerificationError, match="expired"):
+        es256_verifier(ec_key).verify(expired)

@@ -4,6 +4,11 @@ Supabase signs access tokens either with asymmetric signing keys (published
 at <SUPABASE_URL>/auth/v1/.well-known/jwks.json) or, on older projects, with a
 legacy HS256 shared secret. Both are supported; the signature, expiry,
 audience and issuer are always checked. There is no unverified fallback.
+
+Clock skew: a token is accepted up to CLOCK_SKEW_LEEWAY_SECONDS before its `iat` / `nbf` and
+after its `exp` (PyJWT applies one leeway to all three). A machine whose clock trails Supabase
+Auth by a second would otherwise reject a freshly issued token as "not yet valid (iat)". The
+leeway is bounded (at most MAX_CLOCK_SKEW_SECONDS), so an expired token stays expired.
 """
 
 from dataclasses import dataclass
@@ -13,6 +18,8 @@ from uuid import UUID
 import jwt
 
 ACCESS_TOKEN_AUDIENCE = "authenticated"  # noqa: S105 - JWT audience claim, not a secret
+CLOCK_SKEW_LEEWAY_SECONDS = 5
+MAX_CLOCK_SKEW_SECONDS = 30
 _ASYMMETRIC_ALGORITHMS = {"ES256", "RS256", "EdDSA"}
 
 
@@ -37,8 +44,12 @@ class SupabaseJWTVerifier:
         issuer: str,
         jwt_secret: str | None = None,
         jwks_client: jwt.PyJWKClient | None = None,
+        leeway_seconds: int = CLOCK_SKEW_LEEWAY_SECONDS,
     ) -> None:
+        if not 0 <= leeway_seconds <= MAX_CLOCK_SKEW_SECONDS:
+            raise ValueError(f"clock skew leeway must be 0-{MAX_CLOCK_SKEW_SECONDS} s")
         self.issuer = issuer
+        self.leeway_seconds = leeway_seconds
         self._jwt_secret = jwt_secret
         self._jwks_client = jwks_client or jwt.PyJWKClient(
             f"{issuer}/.well-known/jwks.json", cache_keys=True, lifespan=600
@@ -74,6 +85,7 @@ class SupabaseJWTVerifier:
                 algorithms=[algorithm],
                 audience=ACCESS_TOKEN_AUDIENCE,
                 issuer=self.issuer,
+                leeway=self.leeway_seconds,
                 options={"require": ["exp", "iat", "sub", "aud", "iss"]},
             )
         except jwt.ExpiredSignatureError as exc:

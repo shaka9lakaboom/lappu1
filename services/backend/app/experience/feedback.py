@@ -138,6 +138,7 @@ def _skill_in_scope(conn: Connection, learner_id: UUID, skill_id: UUID) -> bool:
                 exists (select 1 from public.course_skills cs
                           join public.course_memberships m
                             on m.course_id = cs.course_id and m.user_id = %(learner)s
+                           and m.role = 'STUDENT'
                          where cs.skill_id = n.id and cs.active)
                 or exists (select 1 from public.evidence_events e
                             where e.learner_id = %(learner)s and e.skill_id = n.id)

@@ -10,7 +10,7 @@ def test_only_the_published_phase_routes_exist(client) -> None:
     response = client.get("/openapi.json")
     assert response.status_code == 200
     # P1 ingestion + P2 courses + P4 ledger + P5 skill detail, activity, feedback and
-    # recommendations + P6 verification. Teacher and admin (P7) endpoints belong to a later phase.
+    # recommendations + P6 verification + P7 me, teacher and admin.
     assert set(response.json()["paths"]) == {
         "/health",
         "/v1/events/batch",
@@ -28,4 +28,21 @@ def test_only_the_published_phase_routes_exist(client) -> None:
         "/v1/verifications/{session_id}/start",
         "/v1/verifications/{session_id}/submit",
         "/v1/verifications/{session_id}/abandon",
+        "/v1/me",
+        "/v1/teacher/courses",
+        "/v1/teacher/courses/{course_id}/overview",
+        "/v1/admin/overview",
+        "/v1/admin/jobs",
+        "/v1/admin/jobs/{job_id}",
+        "/v1/admin/jobs/{job_id}/retry",
+        "/v1/admin/model-runs",
+        "/v1/admin/skill-candidates",
+        "/v1/admin/skill-candidates/{candidate_id}/review",
+        "/v1/admin/benchmark",
+        "/v1/admin/benchmark/{run_id}",
+        "/v1/admin/courses",
+        "/v1/admin/courses/{course_id}",
+        "/v1/admin/courses/{course_id}/members",
+        "/v1/admin/skills",
+        "/v1/admin/skills/{skill_id}",
     }

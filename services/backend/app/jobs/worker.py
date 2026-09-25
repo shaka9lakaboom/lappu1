@@ -24,6 +24,7 @@ from psycopg_pool import ConnectionPool
 
 from app.jobs.queue import (
     JOB_BOOTSTRAP_COURSE_GRAPH,
+    JOB_EMBED_SKILL,
     JOB_GENERATE_VERIFICATION,
     JOB_GRADE_VERIFICATION,
     JOB_PROCESS_RAW_MESSAGE,
@@ -209,10 +210,14 @@ def build_worker(
     **kwargs: object,
 ) -> Worker:
     """The production worker: P2 course bootstrap + raw-message processing (P3A mapping,
-    P3B attribution/evidence, P4 ledger) + P6 verification generation and grading.
-    `evidence=False` stops after P3A (tests)."""
+    P3B attribution/evidence, P4 ledger) + P6 verification generation and grading + P7 skill
+    (re-)embedding after a candidate review. `evidence=False` stops after P3A (tests)."""
     from app.intelligence.processing.pipeline import process_raw_message_job
-    from app.intelligence.skill_graph.jobs import mark_bootstrap_failed, run_bootstrap_job
+    from app.intelligence.skill_graph.jobs import (
+        mark_bootstrap_failed,
+        run_bootstrap_job,
+        run_embed_skill_job,
+    )
     from app.intelligence.verification.jobs import (
         mark_generation_failed,
         mark_grading_failed,
@@ -229,6 +234,7 @@ def build_worker(
             ),
             JOB_GENERATE_VERIFICATION: partial(run_generation_job, pool, gateway),
             JOB_GRADE_VERIFICATION: partial(run_grading_job, pool, gateway),
+            JOB_EMBED_SKILL: partial(run_embed_skill_job, pool, gateway),
         },
         failure_hooks={
             JOB_BOOTSTRAP_COURSE_GRAPH: lambda job, error, final: mark_bootstrap_failed(

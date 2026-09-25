@@ -91,7 +91,8 @@ def _courses(conn: Connection, learner_id: UUID, skill_id: UUID) -> list[SkillCo
         """
         select c.id, c.name, cs.importance, t.id, t.canonical_name
           from public.course_skills cs
-          join public.course_memberships m on m.course_id = cs.course_id and m.user_id = %(learner)s
+          join public.course_memberships m
+            on m.course_id = cs.course_id and m.user_id = %(learner)s and m.role = 'STUDENT'
           join public.courses c on c.id = cs.course_id and c.status = 'ACTIVE'
           left join lateral (
               select tn.id, tn.canonical_name

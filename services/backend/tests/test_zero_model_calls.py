@@ -1,5 +1,6 @@
-"""P5 makes no model call (ADR 0006), and neither does any P6 request (ADR 0007): these modules
-never load the ModelGateway or a provider SDK. P6 generation and grading run in the worker.
+"""P5 makes no model call (ADR 0006), and neither does any P6 request (ADR 0007) or any P7
+teacher / admin request (ADR 0008): these modules never load the ModelGateway or a provider SDK.
+P6 generation and grading, and the P7 skill re-embedding, run in the worker.
 
 Checked in a fresh interpreter, so modules imported by other tests cannot mask a dependency.
 The database tests additionally assert that model_runs never grows across every P5 endpoint.
@@ -33,6 +34,17 @@ P5_MODULES = (
     "app.intelligence.verification.evidence",
     "app.intelligence.mastery.engine",
     "app.intelligence.debt.engine",
+    # P7: me, teacher overview, admin operations (retry, candidate review, lookup, benchmark).
+    "app.api.v1.me",
+    "app.api.v1.teacher",
+    "app.api.v1.admin",
+    "app.auth.roles",
+    "app.teacher.service",
+    "app.admin.jobs",
+    "app.admin.candidates",
+    "app.admin.lookup",
+    "app.admin.monitoring",
+    "app.intelligence.skill_graph.stages",
 )
 
 

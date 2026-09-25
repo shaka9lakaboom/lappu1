@@ -39,7 +39,8 @@ def get_recommendations(
             if (
                 course_id is not None
                 and conn.execute(
-                    "select 1 from public.course_memberships where course_id = %s and user_id = %s",
+                    "select 1 from public.course_memberships "
+                    "where course_id = %s and user_id = %s and role = 'STUDENT'",
                     (course_id, user.id),
                 ).fetchone()
                 is None

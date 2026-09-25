@@ -40,3 +40,5 @@ export * from './raw-activity';
 export * from './courses';
 export * from './intelligence';
 export * from './experience';
+export * from './teacher';
+export * from './admin';
