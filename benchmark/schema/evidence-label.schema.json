@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skillmirror/benchmark/evidence-label.schema.json",
+  "title": "Expected ledger outcome for one P3B/P4 safety case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "expected"],
+  "properties": {
+    "case_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["skills"],
+      "properties": {
+        "attribution_calls": { "type": "integer", "minimum": 0 },
+        "skills": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["evidence_events", "mastery_state", "debt_eligible", "debt_actionable"],
+            "properties": {
+              "evidence_events": { "type": "integer", "minimum": 0 },
+              "mastery_state": { "enum": ["UNKNOWN", "EMERGING", "DEVELOPING", "DEMONSTRATED", "VERIFIED", "NEEDS_REVERIFICATION"] },
+              "mastery_gain": { "type": "boolean" },
+              "debt_eligible": { "type": "boolean" },
+              "debt_actionable": {
+                "description": "false = a false AI Assistance Debt if the ledger ends actionable (the primary safety metric).",
+                "type": "boolean"
+              },
+              "max_debt_score": { "type": "number", "minimum": 0, "maximum": 100 },
+              "min_debt_score": { "type": "number", "minimum": 0, "maximum": 100 }
+            }
+          }
+        }
+      }
+    }
+  }
+}

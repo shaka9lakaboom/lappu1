@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skillmirror/benchmark/evidence-case.schema.json",
+  "title": "SkillMirror P3B/P4 safety case: scripted attribution outputs of captured turns",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "family", "description", "course", "skills", "turns"],
+  "properties": {
+    "case_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "family": { "enum": ["relevance", "attribution", "evidence", "debt", "abstention"] },
+    "description": { "type": "string", "minLength": 8 },
+    "course": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "subject": { "type": ["string", "null"] },
+        "level": { "type": ["string", "null"] }
+      }
+    },
+    "skills": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["importance", "difficulty_band"],
+        "properties": {
+          "importance": { "type": "number", "minimum": 0, "maximum": 1 },
+          "difficulty_band": { "type": ["integer", "null"], "minimum": 1, "maximum": 5 }
+        }
+      }
+    },
+    "turns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["days_ago", "route", "learning_relevance", "user", "assistant", "recent_assistant", "mappings", "attribution_outputs"],
+        "properties": {
+          "days_ago": { "type": "number", "minimum": 0 },
+          "route": { "enum": ["MAP", "METADATA_ONLY", "STOP", "UNCERTAIN"] },
+          "learning_relevance": { "enum": ["high", "medium", "low", "none", "uncertain"] },
+          "user": { "type": "string", "minLength": 1 },
+          "assistant": { "type": ["string", "null"] },
+          "recent_assistant": { "type": "array", "items": { "type": "string" } },
+          "mappings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["skill", "confidence"],
+              "properties": {
+                "skill": { "type": "string" },
+                "confidence": { "type": "number", "minimum": 0, "maximum": 1 }
+              }
+            }
+          },
+          "attribution_outputs": {
+            "description": "Scripted SKILL_ATTRIBUTION answers in order (the last one also answers a repair). Raw strings are allowed to test malformed output; items name a skill key or an explicit skill_id.",
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": ["object", "string"] }
+          }
+        }
+      }
+    }
+  }
+}
