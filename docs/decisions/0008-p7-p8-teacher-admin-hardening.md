@@ -13,8 +13,8 @@
 ```
 GET /v1/me                          profile role (database) -> capabilities (which links to show)
 GET /v1/teacher/courses[/{id}/overview]
-    TEACHER/ADMIN profile -> TEACHER membership (ADMIN: any course) -> cohort aggregates of the
-    course's STUDENT members only; suppressed below min_cohort (>= 3)
+    TEACHER/ADMIN profile -> a TEACHER membership of that course (no ADMIN bypass: 404) ->
+    cohort aggregates of the course's STUDENT members only; suppressed below min_cohort (>= 3)
 /v1/admin/*  (ADMIN profile)
     reads: overview, jobs, model runs (+ budget), candidates, benchmark, course/skill lookup
     writes (Idempotency-Key -> one transaction -> audit event):
@@ -90,9 +90,11 @@ No P7 endpoint makes a model call (test_zero_model_calls loads every P7 module g
     `scripts/grant_role.py` (DATABASE_URL), which writes the change and an OPERATOR `ROLE_CHANGE`
     audit event in one transaction. There is no role API.
 12. Matrix (tested for every route): anonymous 401; STUDENT 403 on every teacher / admin route;
-    TEACHER 403 on admin routes; the overview of a course the teacher does not teach is **404**
-    (existence hidden); ADMIN 200 (it may open any course's aggregate overview, e.g. from the
-    lookup). A malformed or foreign token is 401 before any database access.
+    TEACHER 403 on admin routes; the teacher overview requires a TEACHER membership of **that
+    specific course** — anyone else gets **404** (existence hidden), an ADMIN profile included
+    (owner correction, 2026-09-25: admin course access is the admin course lookup,
+    `/v1/admin/courses[/{id}]`; an ADMIN who is also a TEACHER member is served like a teacher).
+    ADMIN 200 on the admin routes. A malformed or foreign token is 401 before any database access.
 
 ## Teacher overview
 
@@ -177,8 +179,8 @@ No P7 endpoint makes a model call (test_zero_model_calls loads every P7 module g
   course-level cohort floor is the protection, not per-cell noise.
 - The teacher view reads the ledger as stored; a row decays only when recomputed (P8 adds the
   daily recompute).
-- `GET /v1/teacher/courses` lists only courses with a TEACHER membership; an ADMIN reaches other
-  courses' overviews through the lookup.
+- The teacher endpoints serve only courses with a TEACHER membership; an ADMIN inspects other
+  courses through the admin course lookup (members, counts), which shows no cohort aggregates.
 - Candidate APPROVE does not remap earlier turns and cannot rename the candidate; MERGE does not
   merge two existing nodes (that stays `registry.merge_skill`, operator-side).
 - Audit events outlive deleted accounts with a null actor; nothing deletes them.

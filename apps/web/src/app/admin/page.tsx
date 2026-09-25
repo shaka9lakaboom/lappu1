@@ -172,11 +172,7 @@ export default async function AdminPage({ searchParams }: PageProps<'/admin'>) {
                 <tbody className="divide-y">
                   {courses.data.courses.map((c) => (
                     <tr key={c.id}>
-                      <td className="py-1 pr-3">
-                        <Link href={`/teacher/courses/${c.id}`} className="underline underline-offset-4">
-                          {c.name}
-                        </Link>
-                      </td>
+                      <td className="py-1 pr-3">{c.name}</td>
                       <td className="px-2 py-1 text-xs">
                         {c.graph_status} v{c.graph_version} · {c.skill_count} skills
                       </td>

@@ -254,7 +254,13 @@ def test_authorization_uses_the_profile_role_and_the_membership(
     listed = client.get("/v1/teacher/courses", headers=auth(make_token(cohort["other_teacher"])))
     assert listed.status_code == 200 and listed.json()["courses"] == []
     assert overview(client, make_token, cohort["teacher"], course).status_code == 200
-    # An admin may open any course's aggregate overview.
+    # An ADMIN without a TEACHER membership of this course gets the same 404 (admins use the
+    # admin course lookup); with the membership, the teacher endpoint serves them like a teacher.
+    admin = auth(make_token(cohort["admin"]))
+    assert overview(client, make_token, cohort["admin"], course).status_code == 404
+    assert client.get("/v1/teacher/courses", headers=admin).json()["courses"] == []
+    assert client.get(f"/v1/admin/courses/{course}", headers=admin).status_code == 200
+    enroll(db_pool, course, cohort["admin"], "TEACHER")
     assert overview(client, make_token, cohort["admin"], course).status_code == 200
     me = client.get("/v1/me", headers=auth(make_token(cohort["teacher"]))).json()
     assert me["role"] == "TEACHER" and me["taught_course_count"] == 1

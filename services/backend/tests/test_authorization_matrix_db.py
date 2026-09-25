@@ -5,6 +5,7 @@ token claims ADMIN in its (client-writable) metadata is refused everywhere.
     route family        anonymous  student  teacher  admin
     /v1/me                 401       200      200     200
     /v1/teacher/courses    401       403      200     200
+    .../{id}/overview      401       403      404*    404*   (* without a TEACHER membership of it)
     /v1/admin/*            401       403      403     200 (404 for a missing id)
 """
 
@@ -52,7 +53,8 @@ def test_teacher_and_admin_routes_follow_the_profile_role(
         teacher_status = call(client, method, path, teacher).status_code
         admin_status = call(client, method, path, admin).status_code
         if "/v1/teacher" in path:
-            # The overview of a course the teacher does not teach is a 404 (existence hidden).
+            # The overview of a course one does not teach is a 404 (existence hidden) - for an
+            # ADMIN profile too: the teacher endpoint needs a TEACHER membership of the course.
             assert teacher_status == (404 if "overview" in path else 200), (path, teacher_status)
             assert admin_status == (404 if "overview" in path else 200), (path, admin_status)
         else:

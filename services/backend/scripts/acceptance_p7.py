@@ -525,13 +525,17 @@ def verify(args, pool, supabase: Http) -> Report:
         matrix[label] = [call(api, tokens[label], m, p)[0] for m, p in routes]
     expected_teacher = [200, 200] + [403] * 14
     expected_outsider = [200, 404] + [403] * 14
-    admin_ok = all(s in (200, 404, 422) for s in matrix["admin"][2:]) and matrix["admin"][:2] == [
-        200,
-        200,
-    ]
+    # The ADMIN is not a TEACHER member of the class: its teacher overview is 404 like any
+    # non-member's, while the admin course lookup of the same course is 200.
+    admin_ok = (
+        all(s in (200, 404, 422) for s in matrix["admin"][2:])
+        and matrix["admin"][:2] == [200, 404]
+        and matrix["admin"][12] == 200
+    )
     report.check(
         "V4",
-        "matrix: student 403 / teacher own course 200, admin 403 / outsider teacher 404 / admin 200",
+        "matrix: student 403 / teacher own course 200, admin 403 / outsider teacher 404 / "
+        "admin: teacher overview 404, admin routes 200",
         matrix["student1"] == [403] * 16
         and matrix["teacher"] == expected_teacher
         and matrix["outsider"] == expected_outsider

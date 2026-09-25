@@ -4,8 +4,9 @@
     GET /v1/teacher/courses/{id}/overview    cohort aggregates of one of them
 
 A TEACHER or ADMIN profile is required (403 otherwise; the role is read from the database).
-The overview needs a TEACHER membership of the course, else 404 so that a course's existence
-does not leak; an ADMIN may open any course's overview (it holds aggregates only).
+The overview needs a TEACHER membership of that specific course, else 404 so that a course's
+existence does not leak - for an ADMIN too: admin course access is the admin course lookup
+(`/v1/admin/courses[/{id}]`), not this endpoint.
 """
 
 from uuid import UUID

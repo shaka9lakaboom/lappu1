@@ -102,16 +102,17 @@ def list_taught_courses(
 
 
 def _authorized_course(conn: Connection, actor: Actor, course_id: UUID) -> tuple | None:
-    """A course the actor teaches; an ADMIN may open any course's (aggregate) overview."""
+    """A course the actor holds a TEACHER membership of, whatever the profile role: an ADMIN
+    without that membership gets nothing here (admins use the admin course lookup)."""
     return conn.execute(
         _COURSE_SELECT  # noqa: S608 - constant SQL fragments; values are bound
         + """
          where c.id = %(course)s
-           and (%(admin)s or exists (select 1 from public.course_memberships t
-                                      where t.course_id = c.id and t.user_id = %(actor)s
-                                        and t.role = 'TEACHER'))
+           and exists (select 1 from public.course_memberships t
+                        where t.course_id = c.id and t.user_id = %(actor)s
+                          and t.role = 'TEACHER')
         """,
-        {"course": course_id, "actor": actor.id, "admin": actor.is_admin},
+        {"course": course_id, "actor": actor.id},
     ).fetchone()
 
 
