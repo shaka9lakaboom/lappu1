@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "skillmirror/benchmark/label.schema.json",
+  "title": "Expected outcome for one benchmark case",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["case_id", "expected"],
+  "properties": {
+    "case_id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{2,63}$" },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routes", "evidence_expected"],
+      "properties": {
+        "routes": {
+          "description": "Every segment's route must be one of these.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["MAP", "METADATA_ONLY", "STOP", "UNCERTAIN"] }
+        },
+        "must_include_routes": {
+          "description": "Routes that at least one segment must take.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "enum": ["MAP", "METADATA_ONLY", "STOP", "UNCERTAIN"] }
+        },
+        "min_segments": { "type": "integer", "minimum": 1 },
+        "max_segments": { "type": "integer", "minimum": 1 },
+        "mapped_skill_any": {
+          "description": "At least one accepted skill's canonical name contains one of these (case-insensitive).",
+          "type": "array",
+          "items": { "type": "string", "minLength": 2 }
+        },
+        "abstain_allowed": {
+          "description": "A MAP segment may end in explicit abstention (e.g. an unknown concept).",
+          "type": "boolean"
+        },
+        "evidence_expected": { "const": false, "description": "P2/P3A never create evidence." }
+      }
+    }
+  }
+}

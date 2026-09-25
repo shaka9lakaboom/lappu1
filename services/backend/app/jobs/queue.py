@@ -1,7 +1,8 @@
 """PostgreSQL-backed durable job queue (architecture §7.3).
 
-P1 creates jobs and provides the claim/complete/fail primitives that the P3
-worker loop will use. No worker runs yet, and no job is processed.
+Claim/complete/fail/defer primitives used by the worker loop (app/jobs/worker.py).
+Delivery is at-least-once: handlers are idempotent, and a job whose worker died
+mid-way is recovered from its stale lock and retried.
 
     PENDING -> PROCESSING -> COMPLETED
                    | failure
@@ -17,6 +18,7 @@ from uuid import UUID
 from psycopg import Connection
 
 JOB_PROCESS_RAW_MESSAGE = "PROCESS_RAW_MESSAGE"
+JOB_BOOTSTRAP_COURSE_GRAPH = "BOOTSTRAP_COURSE_GRAPH"
 
 _BASE_BACKOFF = timedelta(seconds=30)
 _MAX_BACKOFF = timedelta(minutes=30)
@@ -32,6 +34,14 @@ class ClaimedJob:
     learner_id: UUID | None
     attempts: int
     max_attempts: int
+
+
+@dataclass(frozen=True)
+class JobResult:
+    """What a handler returns. `defer_seconds` reschedules without spending an attempt."""
+
+    outcome: str
+    defer_seconds: int | None = None
 
 
 def enqueue_job(
@@ -81,17 +91,53 @@ def claim_jobs(
     return [ClaimedJob(*row) for row in rows]
 
 
-def complete_job(conn: Connection, job_id: UUID) -> None:
+def complete_job(conn: Connection, job_id: UUID, outcome: str | None = None) -> None:
     with conn.transaction():
         conn.execute(
             """
             update public.processing_jobs
                set state = 'COMPLETED', locked_at = null, locked_by = null,
-                   completed_at = now(), last_error = null
+                   completed_at = now(), last_error = null, outcome = %s
              where id = %s and state = 'PROCESSING'
             """,
-            (job_id,),
+            (outcome, job_id),
         )
+
+
+def defer_job(conn: Connection, job_id: UUID, delay: timedelta, outcome: str) -> None:
+    """Put a claimed job back for later without counting the claim as an attempt
+    (e.g. a user message whose assistant reply has not arrived yet)."""
+    with conn.transaction():
+        conn.execute(
+            """
+            update public.processing_jobs
+               set state = 'PENDING', locked_at = null, locked_by = null,
+                   attempts = greatest(attempts - 1, 0), outcome = %s,
+                   available_at = now() + %s
+             where id = %s and state = 'PROCESSING'
+            """,
+            (outcome, delay, job_id),
+        )
+
+
+def recover_stale_jobs(conn: Connection, stale_after: timedelta) -> list[tuple[UUID, str]]:
+    """Crash recovery: PROCESSING jobs whose lock is older than `stale_after` belonged
+    to a worker that died. Each counts as a failed attempt (RETRY_WAIT or FAILED)."""
+    with conn.transaction():
+        rows = conn.execute(
+            """
+            update public.processing_jobs
+               set state = case when attempts >= max_attempts then 'FAILED'::public.job_state
+                                else 'RETRY_WAIT'::public.job_state end,
+                   locked_at = null, locked_by = null,
+                   last_error = 'worker lock expired (worker crashed or was stopped)',
+                   available_at = now()
+             where state = 'PROCESSING' and locked_at < now() - %s
+            returning id, state::text
+            """,
+            (stale_after,),
+        ).fetchall()
+    return [(row[0], row[1]) for row in rows]
 
 
 def retry_delay(attempts: int) -> timedelta:

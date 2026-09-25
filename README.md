@@ -8,7 +8,13 @@ independent evidence.
 - Live implementation status: [`docs/project-state.md`](docs/project-state.md)
 - Implementation decisions: [`docs/decisions/`](docs/decisions/)
 
-Current phase: **P0 — Foundation**. No capture, ingestion or intelligence exists yet.
+Current phase: **P2 — Courses + Skill Graph and P3A — Qualification + Retrieval + Mapping**
+(see [`docs/project-state.md`](docs/project-state.md) for the verified status). Attribution,
+evidence, mastery and verification are later phases.
+
+SkillMirror is a **local-first hackathon application**: an unpacked Chrome extension, the
+Next.js web app on `localhost:3000` and the FastAPI backend on `localhost:8000`, backed by a
+hosted Supabase project and the Google AI (Gemini) API. There is no Vercel/Render deployment.
 
 ## Repository layout
 
@@ -19,14 +25,14 @@ apps/
 services/
   backend/        FastAPI service; engine boundaries are modules inside one deployable
 packages/
-  contracts/      Canonical enums, TS types and JSON schemas (e.g. /health)
-  config/         Shared constants (policy defaults later)
+  contracts/      Canonical enums, TS types and JSON schemas (ingestion, courses, intelligence)
+  config/         Shared constants (tunable policy lives in the policy_config table)
   ui/             Shared UI utilities
 supabase/
-  migrations/     Numbered SQL migrations (0001_p0_foundation.sql)
+  migrations/     Numbered SQL migrations (0001 foundation, 0002 capture, 0003 courses + skill graph)
   seed/           Local seed (intentionally empty: no fake data)
   tests/          pgTAP tests for migrations and RLS
-benchmark/        Intelligence benchmark cases, labels, runners (from P3)
+benchmark/        Intelligence benchmark schema, cases, labels, runners (P3A smoke set)
 docs/             Architecture, decisions, project state
 .github/workflows/ci.yml
 ```
@@ -62,15 +68,22 @@ cp services/backend/.env.example services/backend/.env
 | --- | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | web | Project URL. Required; the app refuses to start without it. |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | web | Anon or publishable key. A secret/service-role key is rejected. |
-| `NEXT_PUBLIC_API_URL` | web | Backend base URL, e.g. `http://localhost:8000` (optional at P0). |
+| `NEXT_PUBLIC_API_URL` | web | Backend base URL, e.g. `http://localhost:8000`. Needed for the Courses pages. |
 | `APP_ENV` | backend | `development` \| `test` \| `staging` \| `production` |
 | `APP_NAME`, `API_VERSION` | backend | Reported by `/health`; sensible defaults. |
 | `CORS_ORIGINS` | backend | Comma-separated exact origins, e.g. `http://localhost:3000` |
 | `SUPABASE_URL` | backend | Needed to verify access tokens. Required in staging/production. |
-| `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` | backend | Reserved for P1 server-side DB access. |
 | `SUPABASE_JWT_SECRET` | backend | Only for projects on the legacy HS256 JWT secret. |
+| `DATABASE_URL` | backend | Postgres connection string (Supabase session pooler). Server only. |
+| `GEMINI_API_KEY` | backend | Google AI key. Server only. Without it the worker stays idle and jobs stay `PENDING`. |
+| `GEMINI_GENERATION_MODEL`, `GEMINI_EMBEDDING_MODEL` | backend | Defaults `gemini-3.7-flash`, `gemini-embedding-2` (768 dims). |
+| `GEMINI_GENERATION_RPM`, `GEMINI_EMBEDDING_RPM` | backend | Optional client-side request limits per minute and model (free tier: 5 RPM). 429/503 never fail a job; it is deferred. |
+| `GEMINI_ROUTINE_MODEL`, `GEMINI_ROUTINE_THINKING_LEVEL` | backend | Opt-in free-tier routing (ADR 0004): routine per-turn analysis on this model (e.g. `gemini-3.5-flash-lite`); graph bootstrap and adjudication stay on `GEMINI_GENERATION_MODEL`. |
+| `MODEL_DAILY_REQUEST_LIMITS`, `MODEL_QUOTA_RESERVE` | backend | Daily request budget per model (default `gemini-3.7-flash=20,gemini-3.8-flash=20`, reserve 2; `off` disables). A job that would spend the reserve is deferred, never failed. |
+| `MODEL_RESULT_CACHE`, `TURN_ANALYSIS_MODE` | backend | Exact result cache (default on) and turn execution: `combined` (default, 1 generation request per normal turn) or `staged`. |
+| `WORKER_ENABLED` | backend | In-process worker loop (default `true`); `false` to run `python -m app.jobs.worker` separately. |
 
-The service-role key must never appear in web or extension code.
+The service-role key and the Gemini API key must never appear in web or extension code.
 
 ### Database
 
@@ -82,7 +95,7 @@ npx supabase link --project-ref <project-ref>
 npx supabase db push
 ```
 
-or paste `supabase/migrations/0001_p0_foundation.sql` into the SQL editor. With a local
+or paste the files in `supabase/migrations/` into the SQL editor in order. With a local
 stack (Docker): `npx supabase start`, then `npx supabase test db` runs the pgTAP tests.
 
 ## Run
@@ -91,6 +104,16 @@ stack (Docker): `npx supabase start`, then `npx supabase test db` runs the pgTAP
 npm run dev:web        # http://localhost:3000
 npm run dev:backend    # http://localhost:8000/health  (with the backend venv active)
 npm run build:extension
+```
+
+With `DATABASE_URL` and `GEMINI_API_KEY` set, the backend also runs the durable worker: it
+generates course skill graphs (`/courses/new` → `/courses/{id}`) and analyses captured turns.
+To run the worker on its own, or drain the queue once:
+
+```bash
+cd services/backend
+python -m app.jobs.worker          # loop
+python -m app.jobs.worker --once   # process what is runnable now, then exit
 ```
 
 Load the extension: `chrome://extensions` → enable **Developer mode** → **Load
@@ -127,7 +150,9 @@ Without configuration the test is skipped, never passed.
 ## CI
 
 `.github/workflows/ci.yml` runs on pushes and pull requests: repository hygiene
-(no env files or secrets tracked), backend lint + pytest, web lint + typecheck + unit
-tests + production build, extension typecheck + build + manifest validation + load test
-in Chromium, database migrations + pgTAP, and the auth round trip against a local
-Supabase stack.
+(no env files or secrets tracked), backend lint + pytest, backend integration tests
+against real Postgres (ingestion, courses, skill graph, retrieval, P3A pipeline, worker),
+web lint + typecheck + unit tests + production build, extension typecheck + build +
+manifest validation + Chromium tests, database migrations + pgTAP, and the auth round trip
+against a local Supabase stack. Intelligence tests use a scripted fake model provider, so CI
+never needs a Gemini key; the real-model acceptance is a documented local gate.
