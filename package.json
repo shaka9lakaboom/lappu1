@@ -20,6 +20,7 @@
     "demo:backend": "node scripts/demo.mjs backend",
     "demo:web": "node scripts/demo.mjs web",
     "demo:check": "node scripts/demo.mjs check",
+    "demo:verify": "node scripts/demo.mjs verify",
     "test:demo": "node --test scripts/demo.test.mjs",
     "build:web": "npm run build --workspace @skillmirror/web",
     "build:extension": "npm run build --workspace @skillmirror/extension",

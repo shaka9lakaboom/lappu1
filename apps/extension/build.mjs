@@ -9,7 +9,7 @@
 //   3. apps/web/.env.local:    NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, NEXT_PUBLIC_API_URL
 // Without them the build still succeeds and the popup reports "Not configured"
 // (CI builds this way). Secret or service-role keys are refused.
-import { copyFile, mkdir, rm } from 'node:fs/promises';
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -111,3 +111,22 @@ await build({
 await mkdir(join(dist, 'popup'), { recursive: true });
 await copyFile(join(root, 'manifest.json'), join(dist, 'manifest.json'));
 await copyFile(join(root, 'src/popup/popup.html'), join(dist, 'popup/popup.html'));
+
+// Public build facts for `npm run demo:check` / `demo:verify` (P9): which API and web the bundle
+// talks to. Origins only - never a key (the anon key is only reported as set / unset).
+const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
+await writeFile(
+  join(dist, 'build-info.json'),
+  `${JSON.stringify(
+    {
+      extensionVersion: manifest.version,
+      apiUrl: config.apiUrl,
+      webUrl: config.webUrl,
+      supabaseUrl: config.supabaseUrl,
+      anonKey: config.supabaseAnonKey ? 'set' : 'unset',
+    },
+    null,
+    2,
+  )}
+`,
+);

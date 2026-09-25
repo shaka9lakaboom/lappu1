@@ -107,6 +107,8 @@ jobs:
           npm run typecheck --workspace @skillmirror/contracts --workspace @skillmirror/config --workspace @skillmirror/ui
       - name: Unit tests
         run: npm run test:web
+      - name: Demo launcher tests (preflight / verify; no env files, no network)
+        run: npm run test:demo
       # Deliberately built without Supabase variables: the build must not
       # need secrets, and no page may silently fall back to placeholders.
       - name: Production build
