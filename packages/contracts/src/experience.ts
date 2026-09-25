@@ -28,6 +28,9 @@ import type {
   SegmentIntent,
   SegmentRoute,
   SkillMappingStatus,
+  VerificationAssessmentType,
+  VerificationEvaluatorType,
+  VerificationState,
 } from './intelligence';
 import type { JobState, MessageRole } from './raw-activity';
 import type { SourceProvider } from './index';
@@ -38,7 +41,16 @@ export type FactorLevel = (typeof FACTOR_LEVELS)[number];
 export const DEBT_FACTOR_CODES = ['DELEGATION_PRESSURE', 'EVIDENCE_GAP', 'IMPORTANCE', 'CONFIDENCE', 'VERIFICATION'] as const;
 export type DebtFactorCode = (typeof DEBT_FACTOR_CODES)[number];
 
-export const MASTERY_GATE_CODES = ['ENOUGH_EVIDENCE', 'STRONG_RESULTS', 'SUSTAINED_EVIDENCE', 'INDEPENDENT_APPLICATION'] as const;
+export const MASTERY_GATE_CODES = [
+  'ENOUGH_EVIDENCE',
+  'STRONG_RESULTS',
+  'SUSTAINED_EVIDENCE',
+  'INDEPENDENT_APPLICATION',
+  // P6: the VERIFIED entry gates (shown once the skill has a SkillMirror verification).
+  'RECENT_CHECK_PASSED',
+  'VERIFIED_RESULTS',
+  'VERIFIED_EVIDENCE',
+] as const;
 export type MasteryGateCode = (typeof MASTERY_GATE_CODES)[number];
 
 /** Which targets each feedback action may concern (mirrors the 0007 feedback_action_target check). */
@@ -71,6 +83,9 @@ export interface Recommendation {
   course_ids: string[];
   created_at: string;
   updated_at: string;
+  /** P6: the skill's open verification session for a VERIFY / REVERIFY recommendation, if any. */
+  verification_session_id?: string | null;
+  verification_state?: VerificationState | null;
 }
 
 /** Body of GET /v1/recommendations. */
@@ -282,4 +297,125 @@ export interface ActivityRow {
 export interface ActivityResponse {
   items: ActivityRow[];
   next_before: string | null;
+}
+
+// --- Verification Center (P6) ---------------------------------------------------------------------
+//
+// A challenge is sanitized: its answer key and rubric never leave the server.
+
+export const VERIFICATION_STATUSES = [
+  'PREPARING',
+  'NOT_ISSUED',
+  'READY',
+  'IN_PROGRESS',
+  'EVALUATING',
+  'NEEDS_REVIEW',
+  'PASSED',
+  'PARTIAL',
+  'NOT_PASSED',
+  'ABANDONED',
+] as const;
+export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
+
+export interface VerificationChoice {
+  key: string;
+  text: string;
+}
+
+export interface VerificationCriterion {
+  criterion: string;
+  met: boolean;
+}
+
+/** The graded result of a verification (after evaluation only). */
+export interface VerificationResult {
+  id: string;
+  score: number;
+  passed: boolean;
+  outcome_signal: OutcomeSignal;
+  feedback: string;
+  grading_confidence: number;
+  evaluator_type: VerificationEvaluatorType;
+  criteria: VerificationCriterion[];
+  /** The VERIFICATION EvidenceEvent this result became. */
+  evidence_id: string | null;
+  created_at: string;
+}
+
+export interface VerificationSessionSummary {
+  id: string;
+  skill_id: string;
+  canonical_name: string;
+  course_id: string | null;
+  state: VerificationState;
+  status: VerificationStatus;
+  trigger_type: RecommendationType;
+  reason_code: string;
+  recommendation_id: string | null;
+  planned_difficulty: number;
+  assessment_type: VerificationAssessmentType | null;
+  estimated_minutes: number | null;
+  failure_code: string | null;
+  abandon_reason: string | null;
+  created_at: string;
+  ready_at: string | null;
+  started_at: string | null;
+  submitted_at: string | null;
+  evaluated_at: string | null;
+  abandoned_at: string | null;
+  result: VerificationResult | null;
+}
+
+/** The sanitized challenge: what the learner needs to answer, nothing about the answer. */
+export interface VerificationChallenge {
+  session_id: string;
+  item_id: string;
+  skill_id: string;
+  canonical_name: string;
+  skill_description: string;
+  assessment_type: VerificationAssessmentType;
+  prompt: string;
+  choices: VerificationChoice[];
+  multiple_select: boolean;
+  estimated_minutes: number;
+  max_response_chars: number;
+}
+
+/** Body of GET /v1/verifications/{id} and of POST .../start and .../abandon. */
+export interface VerificationDetailResponse {
+  session: VerificationSessionSummary;
+  challenge: VerificationChallenge | null;
+  response: Record<string, string | string[]> | null;
+}
+
+export interface VerificationBudget {
+  day: string;
+  timezone: string;
+  daily_limit: number;
+  planned_today: number;
+  remaining_today: number;
+}
+
+/** Body of GET /v1/verifications. */
+export interface VerificationsResponse {
+  planner_version: string;
+  budget: VerificationBudget;
+  preparing: VerificationSessionSummary[];
+  ready: VerificationSessionSummary[];
+  in_progress: VerificationSessionSummary[];
+  pending: VerificationSessionSummary[];
+  completed: VerificationSessionSummary[];
+  closed: VerificationSessionSummary[];
+}
+
+/** Body of POST /v1/verifications/{id}/submit (send an Idempotency-Key header). */
+export interface VerificationSubmissionRequest {
+  selected?: string[] | null;
+  answer?: string | null;
+}
+
+export interface VerificationSubmissionResponse {
+  correlation_id: string;
+  created: boolean;
+  session: VerificationSessionSummary;
 }
