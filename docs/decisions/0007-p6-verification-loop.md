@@ -283,7 +283,19 @@ P5 VERIFY / REVERIFY recommendation -> deterministic planner -> PLANNED session 
     browser walkthrough `e2e/p6-acceptance.spec.ts` (recommendation → center → challenge →
     reload/resume → submit → result → Skill Detail VERIFIED). The hosted script
     (`scripts/acceptance_p6_hosted.py`) was rehearsed locally on both fixture paths.
-42. **Hosted:** recorded in `docs/project-state.md` once 0008 is approved, pushed and verified.
+42. **Hosted:** 0008 was pushed on 2026-09-25 with the owner's approval ("0008 only") and
+    verified read-only before any acceptance: local = remote 0001–0008; the new tables and enums
+    exist; `verification_items` has no client grant or policy; `authenticated` has SELECT only
+    on sessions and results, `anon` nothing; the 0006 constraint is gone; the policy key equals
+    the seed; every existing row is unchanged. The hosted real acceptance then **passed on
+    `gemini-3.5-flash-lite`** with 1 generation, 0 evaluation and 0 embedding requests: 12/12
+    checks + the browser walkthrough. It is the **REAL LIVE PROOF** case: a real Gemini
+    challenge (MCQ, attempt 1, all validator checks true) → real submission → deterministic
+    grading → one real VERIFICATION EvidenceEvent → ledger DEVELOPING → VERIFIED (mean 0.780 →
+    0.835, support 2.55 → 4.05, recent pass: every gate met by the live pass itself) → debt
+    15.31 → 2.50 (factor 0.6 → 0.2) → VERIFY COMPLETED. No evidence was added after the live
+    pass. The disposable learner was deleted through the Auth cascade and the real learner's
+    rows were unchanged. Details: `docs/project-state.md`, *Hosted acceptance P6*.
 
 ## Known limitations
 
@@ -299,3 +311,5 @@ P5 VERIFY / REVERIFY recommendation -> deterministic planner -> PLANNED session 
   the mean without triggering re-verification.
 - The debt factor "due" case of §10.4 (1.0 when a check is due) is represented by
   NEEDS_REVERIFICATION → REVERIFY, not by the factor.
+- Live coverage is one deterministically graded MCQ. The rubric evaluator, a regeneration after a
+  validator rejection and a live FAILED result are proven with scripted providers only.
